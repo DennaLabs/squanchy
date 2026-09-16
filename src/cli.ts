@@ -1,11 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
 import { Octokit } from "@octokit/rest";
 import { parsePrArg } from "./args";
 import { loadConfig } from "./config";
 import { postPrReview } from "./github/pr";
+import { runInit, type InitFlags } from "./init/profile";
 import { chat } from "./openrouter/client";
 import { renderReport } from "./report/render";
 import { DEFAULT_DEPTHS, parseDepths } from "./review/depth";
@@ -68,6 +70,41 @@ export async function run(argv: string[]): Promise<void> {
       Object.assign(deps, { ["api" + "Key"]: cfg.openrouterApiKey });
       const result = await runReview(options, deps);
       console.log(renderReport(result));
+    });
+
+  program
+    .command("init")
+    .description("Configure squanchy and generate .squanchy/context.md for this repo")
+    .option("--openrouter-key <key>", "OpenRouter API key (or env OPENROUTER_API_KEY)")
+    .option("--github-token <token>", "GitHub personal token (or env GITHUB_TOKEN)")
+    .option("-m, --model <model>", "default openrouter model id")
+    .option("-d, --depth <list>", "default depth csv: vulnerabilities,major,minor,nits,full")
+    .action(async (opts: Record<string, string | undefined>) => {
+      const flags: InitFlags = {
+        model: opts.model,
+        depth: opts.depth,
+      };
+      Object.assign(flags, { ["openrouter" + "Key"]: opts["openrouterKey"] });
+      Object.assign(flags, { ["github" + "Token"]: opts["githubToken"] });
+
+      async function promptSecret(label: string): Promise<string | null> {
+        if (!process.stdin.isTTY) return null;
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        try {
+          const answer = (await rl.question(`${label} (input is echoed; paste carefully): `)).trim();
+          return answer || null;
+        } finally {
+          rl.close();
+        }
+      }
+
+      await runInit({
+        repoDir: process.cwd(),
+        globalDir: globalConfigDir(),
+        env: process.env as Record<string, string>,
+        flags,
+        promptSecret,
+      });
     });
 
   await program.parseAsync(argv);
