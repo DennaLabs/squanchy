@@ -1,0 +1,15 @@
+import { DepthSchema, type Depth } from "../types";
+
+export const DEFAULT_DEPTHS: Depth[] = ["vulnerabilities", "major"];
+
+export function parseDepths(raw: string): Depth[] {
+  const parts = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const parsed = parts.map((p) => DepthSchema.parse(p));
+  if (parsed.includes("full")) {
+    return ["vulnerabilities", "major", "minor", "nits", "full"];
+  }
+  return [...new Set(parsed)];
+}
