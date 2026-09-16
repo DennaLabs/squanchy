@@ -1,4 +1,5 @@
 import type { Octokit } from "@octokit/rest";
+import type { ReviewResult } from "../types";
 
 export const MAX_DIFF_CHARS = 150_000;
 const TRUNCATION_MARKER = "\n... [squanchy: patch truncated]";
@@ -103,4 +104,63 @@ export async function fetchPrBundle(octokit: Octokit, repo: string, prNumber: nu
     files,
     truncated,
   };
+}
+
+interface InlineComment {
+  path: string;
+  line: number;
+  side: "RIGHT";
+  body: string;
+}
+
+/**
+ * Post the review as a single COMMENT review. Inline comments are only allowed
+ * on lines present in the diff (GitHub 422s otherwise); findings that fail
+ * validation are demoted to file-level bullets in the review body.
+ * squanchy NEVER approves or requests changes.
+ */
+export async function postPrReview(
+  octokit: Octokit,
+  bundle: PrBundle,
+  result: ReviewResult,
+): Promise<{ htmlUrl: string }> {
+  const [owner, repo] = bundle.repo.split("/");
+  const validLines = new Map<string, Set<number>>(
+    bundle.files.map((f) => [f.path, f.patch ? linesInDiff(f.patch) : new Set<number>()]),
+  );
+  const inline: InlineComment[] = [];
+  const fileLevel: string[] = [];
+  for (const f of result.findings) {
+    const ok = f.line !== null && (validLines.get(f.file)?.has(f.line) ?? false);
+    if (ok) {
+      const suggestion = f.suggestion ? `\n\nSuggestion:\n\`\`\`\n${f.suggestion}\n\`\`\`` : "";
+      inline.push({
+        path: f.file,
+        line: f.line as number,
+        side: "RIGHT",
+        body: `**[${f.severity}]** ${f.comment}${suggestion}\n\n<sub>squanchy</sub>`,
+      });
+    } else {
+      fileLevel.push(`- **[${f.severity}]** \`${f.file}${f.line ? `:${f.line}` : ""}\`: ${f.comment}`);
+    }
+  }
+  const body = [
+    result.overview ? `### Overview\n${result.overview.replace(/\n\nPosted: .+$/, "")}\n` : "",
+    `### squanchy review: ${result.findings.length} finding(s)`,
+    ...fileLevel,
+    "\n<sub>AI-generated review. You are always in control of approving this PR.</sub>",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const { data } = await octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number: bundle.prNumber,
+    commit_id: bundle.headSha,
+    event: "COMMENT",
+    body,
+    comments: inline,
+  });
+  return { htmlUrl: data.html_url };
 }
