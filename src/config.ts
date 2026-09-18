@@ -5,12 +5,14 @@ import { DEFAULT_DEPTHS, parseDepths } from "./review/depth";
 import type { SquanchyConfig } from "./types";
 
 export const DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+export const DEFAULT_MAX_STEPS = 25;
 
 const FileSchema = z.object({
   openrouterApiKey: z.string().optional(),
   githubToken: z.string().optional(),
   defaultModel: z.string().optional(),
   defaultDepths: z.array(z.string()).optional(),
+  maxSteps: z.number().int().positive().max(100).optional(),
 });
 
 function readJsonIfExists(path: string): unknown {
@@ -27,7 +29,7 @@ export interface LoadConfigArgs {
 export function loadConfig({ globalDir, repoDir, env }: LoadConfigArgs): SquanchyConfig {
   const g = FileSchema.parse(readJsonIfExists(join(globalDir, "config.json")));
   // Repo config only supplies non-secret defaults; keys in it are ignored on purpose.
-  const r = FileSchema.pick({ defaultModel: true, defaultDepths: true }).parse(
+  const r = FileSchema.pick({ defaultModel: true, defaultDepths: true, maxSteps: true }).parse(
     readJsonIfExists(join(repoDir, ".squanchy", "config.json")),
   );
   const rawDepths = r.defaultDepths ?? g.defaultDepths;
@@ -36,6 +38,7 @@ export function loadConfig({ globalDir, repoDir, env }: LoadConfigArgs): Squanch
     githubToken: env.GITHUB_TOKEN ?? g.githubToken,
     defaultModel: r.defaultModel ?? g.defaultModel ?? DEFAULT_MODEL,
     defaultDepths: rawDepths ? parseDepths(rawDepths.join(",")) : DEFAULT_DEPTHS,
+    maxSteps: r.maxSteps ?? g.maxSteps ?? DEFAULT_MAX_STEPS,
   };
 }
 

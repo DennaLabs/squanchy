@@ -4,14 +4,17 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
 import { Octokit } from "@octokit/rest";
-import { parsePrArg } from "./args";
+import { parsePrArg, tryDetectRepoFromGitRemote } from "./args";
 import { loadConfig } from "./config";
 import { postPrReview } from "./github/pr";
 import { runInit, type InitFlags } from "./init/profile";
-import { chat } from "./openrouter/client";
+import { chatWithTools } from "./openrouter/client";
 import { renderReport } from "./report/render";
 import { DEFAULT_DEPTHS, parseDepths } from "./review/depth";
 import { runReview, type RunReviewDeps } from "./review/run";
+import { GitRefSnapshot } from "./snapshot/git-ref";
+import { TarballSnapshot, githubTarballDownloader } from "./snapshot/tarball";
+import type { RepoSnapshot } from "./snapshot/snapshot";
 import { ModeSchema, type ReviewOptions } from "./types";
 
 export function globalConfigDir(): string {
@@ -25,9 +28,20 @@ function readRepoContext(repoDir: string): () => string | null {
   };
 }
 
+/** Same-repo PRs use git refs in the local clone; foreign repos download the head tarball. */
+export function createCliSnapshot(
+  localRepo: string | null,
+  githubToken: string,
+): (bundle: { repo: string; prNumber: number; headSha: string }) => RepoSnapshot {
+  return (bundle) => {
+    if (localRepo === bundle.repo) return new GitRefSnapshot(process.cwd(), bundle.prNumber, bundle.headSha);
+    return new TarballSnapshot(githubTarballDownloader(githubToken, bundle.repo, bundle.headSha));
+  };
+}
+
 export async function run(argv: string[]): Promise<void> {
   const program = new Command();
-  program.name("squanchy").description("AI code review for PRs").version("0.1.0");
+  program.name("squanchy").description("AI code review for PRs").version("0.2.0");
 
   program
     .command("review")
@@ -43,10 +57,12 @@ export async function run(argv: string[]): Promise<void> {
         repoDir: process.cwd(),
         env: process.env as Record<string, string>,
       });
-      if (!cfg.openrouterApiKey) {
+      const apiKey = cfg.openrouterApiKey;
+      if (!apiKey) {
         throw new Error("Missing OpenRouter API key: set OPENROUTER_API_KEY or run `squanchy init`");
       }
-      if (!cfg.githubToken) {
+      const githubToken = cfg.githubToken;
+      if (!githubToken) {
         throw new Error("Missing GitHub token: set GITHUB_TOKEN or run `squanchy init`");
       }
       const { repo, prNumber } = parsePrArg(prArg);
@@ -59,15 +75,17 @@ export async function run(argv: string[]): Promise<void> {
         depths: opts.depth ? parseDepths(opts.depth) : (cfg.defaultDepths ?? DEFAULT_DEPTHS),
         overview: opts.overview,
       };
-      const octokit = new Octokit({ auth: cfg.githubToken });
-      const deps = {
+      const octokit = new Octokit({ auth: githubToken });
+      const deps: RunReviewDeps = {
         octokit,
-        chat,
+        apiKey,
+        chatWithTools,
         readRepoContext: readRepoContext(process.cwd()),
-        postReview: (bundle: Parameters<typeof postPrReview>[1], res: Parameters<typeof postPrReview>[2]) =>
-          postPrReview(octokit, bundle, res),
-      } as RunReviewDeps;
-      Object.assign(deps, { ["api" + "Key"]: cfg.openrouterApiKey });
+        createSnapshot: createCliSnapshot(tryDetectRepoFromGitRemote(process.cwd()), githubToken),
+        postReview: (bundle, res) => postPrReview(octokit, bundle, res),
+        maxSteps: cfg.maxSteps,
+        debug: process.env.SQUANCHY_DEBUG === "1" ? (line) => console.error(line) : undefined,
+      };
       const result = await runReview(options, deps);
       console.log(renderReport(result));
     });

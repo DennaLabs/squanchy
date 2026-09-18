@@ -1,42 +1,56 @@
 import type { Octokit } from "@octokit/rest";
+import { runAgentLoop } from "../agent/loop";
+import type { ToolCtx } from "../agent/tools";
+import { DEFAULT_MAX_STEPS } from "../config";
 import { fetchPrBundle, type PrBundle } from "../github/pr";
-import type { ChatArgs } from "../openrouter/client";
+import type { AssistantMessage, ChatWithToolsArgs } from "../openrouter/client";
+import type { RepoSnapshot } from "../snapshot/snapshot";
 import type { ReviewOptions, ReviewResult } from "../types";
-import { filterFindingsToDiff, parseReviewResult } from "./parse";
-import { buildPrompt } from "./prompt";
+import { filterFindingsToDiff } from "./parse";
+import { buildFirstUserMessage, buildSystemPrompt } from "./prompt";
 
 export interface RunReviewDeps {
   octokit: Octokit;
-  chat: (args: ChatArgs) => Promise<string>;
   apiKey: string;
+  chatWithTools: (args: ChatWithToolsArgs) => Promise<AssistantMessage>;
   readRepoContext: () => string | null;
+  /** Called lazily, at most once per review, the first time the agent uses a repo-inspection tool. */
+  createSnapshot: (bundle: PrBundle) => RepoSnapshot | Promise<RepoSnapshot>;
   postReview: (bundle: PrBundle, result: ReviewResult) => Promise<{ htmlUrl: string }>;
-}
-
-function makeChatArgs(deps: RunReviewDeps, model: string, system: string, user: string): ChatArgs {
-  const args = { model, system, user } as ChatArgs;
-  Object.assign(args, { ["api" + "Key"]: deps.apiKey });
-  return args;
+  maxSteps?: number;
+  debug?: (line: string) => void;
 }
 
 export async function runReview(options: ReviewOptions, deps: RunReviewDeps): Promise<ReviewResult> {
   const bundle = await fetchPrBundle(deps.octokit, options.repo, options.prNumber);
-  const { system, user } = buildPrompt(bundle, options, deps.readRepoContext());
-  const raw = await deps.chat(makeChatArgs(deps, options.model, system, user));
-  let result: ReviewResult;
+  // holder object so the closure assignment survives TS control-flow narrowing in finally
+  const snapshotRef: { promise: Promise<RepoSnapshot> | null } = { promise: null };
+  const ctx: ToolCtx = {
+    bundle,
+    getSnapshot: () => (snapshotRef.promise ??= Promise.resolve(deps.createSnapshot(bundle))),
+  };
+  let loop;
   try {
-    result = filterFindingsToDiff(parseReviewResult(raw), bundle);
-  } catch {
-    // exactly one retry with a stricter reminder, then give up
-    const retryUser =
-      user +
-      "\n\nYour previous response was not valid JSON per the schema. Respond with ONLY the JSON object.";
-    const retryRaw = await deps.chat(makeChatArgs(deps, options.model, system, retryUser));
-    result = filterFindingsToDiff(parseReviewResult(retryRaw), bundle);
+    loop = await runAgentLoop({
+      chatFn: deps.chatWithTools,
+      apiKey: deps.apiKey,
+      model: options.model,
+      system: buildSystemPrompt(options),
+      firstUser: buildFirstUserMessage(bundle, options, deps.readRepoContext()),
+      ctx,
+      maxSteps: deps.maxSteps ?? DEFAULT_MAX_STEPS,
+      debug: deps.debug,
+    });
+  } finally {
+    if (snapshotRef.promise) {
+      const snapshot = await snapshotRef.promise.catch(() => null);
+      await snapshot?.dispose().catch(() => {});
+    }
   }
+  const result = filterFindingsToDiff({ overview: loop.overview, findings: loop.findings }, bundle);
   if (options.mode === "review") {
     const posted = await deps.postReview(bundle, result);
-    result = { ...result, overview: (result.overview ?? "") + `\n\nPosted: ${posted.htmlUrl}` };
+    return { ...result, overview: (result.overview ?? "") + `\n\nPosted: ${posted.htmlUrl}` };
   }
   return result;
 }

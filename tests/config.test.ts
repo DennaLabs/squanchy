@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, saveGlobalConfig } from "../src/config";
+import { DEFAULT_MAX_STEPS, loadConfig, saveGlobalConfig } from "../src/config";
 
 describe("loadConfig", () => {
   test("repo config overrides global defaults, env overrides secrets", () => {
@@ -30,6 +30,19 @@ describe("loadConfig", () => {
     const cfg = loadConfig({ globalDir: "/nonexistent", repoDir: "/nonexistent", env: {} });
     expect(cfg.defaultModel).toBe("nvidia/nemotron-3-ultra-550b-a55b:free");
     expect(cfg.defaultDepths).toEqual(["vulnerabilities", "major"]);
+    expect(cfg.maxSteps).toBe(DEFAULT_MAX_STEPS);
+  });
+
+  test("maxSteps: repo beats global, invalid rejected", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sq-"));
+    mkdirSync(join(dir, "repo", ".squanchy"), { recursive: true });
+    mkdirSync(join(dir, "global"), { recursive: true });
+    writeFileSync(join(dir, "global", "config.json"), JSON.stringify({ maxSteps: 40 }));
+    writeFileSync(join(dir, "repo", ".squanchy", "config.json"), JSON.stringify({ maxSteps: 10 }));
+    const cfg = loadConfig({ globalDir: join(dir, "global"), repoDir: join(dir, "repo"), env: {} });
+    expect(cfg.maxSteps).toBe(10);
+    writeFileSync(join(dir, "repo", ".squanchy", "config.json"), JSON.stringify({ maxSteps: 0 }));
+    expect(() => loadConfig({ globalDir: join(dir, "global"), repoDir: join(dir, "repo"), env: {} })).toThrow();
   });
 
   test("repo config cannot supply secrets", () => {

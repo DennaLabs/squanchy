@@ -8,6 +8,15 @@ export function detectRepoFromGitRemote(cwd: string = process.cwd()): string {
   return m[1];
 }
 
+/** detectRepoFromGitRemote, but null instead of throwing (worktrees, non-git dirs, foreign repos). */
+export function tryDetectRepoFromGitRemote(cwd: string = process.cwd()): string | null {
+  try {
+    return detectRepoFromGitRemote(cwd);
+  } catch {
+    return null;
+  }
+}
+
 export function parsePrArg(arg: string, cwd: string = process.cwd()): { repo: string; prNumber: number } {
   const url = arg.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
   if (url) return { repo: url[1], prNumber: Number(url[2]) };

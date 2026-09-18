@@ -10,40 +10,61 @@ const FOCUS_TEXT: Record<Depth, string> = {
   full: "Everything above, plus a concise PR overview section explaining what this PR does.",
 };
 
-export function buildPrompt(
+/** Diffs are inlined in the first message up to this budget; larger PRs page them via get_file_diff. */
+export const INLINE_DIFF_BUDGET = 60_000;
+
+export function buildSystemPrompt(options: ReviewOptions): string {
+  return [
+    "You are squanchy, a precise senior code reviewer operating as an agent on a GitHub pull request.",
+    "The first user message contains PR metadata, the changed-files list, and (budget permitting) the diffs.",
+    "You have tools to inspect the repository at the PR head commit and to record your output.",
+    "",
+    "Focus areas for this review:",
+    ...options.depths.map((d) => `- ${FOCUS_TEXT[d]}`),
+    "",
+    "Workflow:",
+    "1. Read the diffs. Before concluding anything suspicious or unclear, gather context with get_file_diff, read_file, list_dir, or grep (full files at the PR head, callers, definitions, related config).",
+    "2. Record every finding with submit_finding, one call per finding.",
+    "3. Call finish_review exactly once when done. Pass an overview only when the 'full' focus is active.",
+    "",
+    "Finding rules:",
+    "- Only report issues grounded in code you actually saw. Never invent findings; an empty review is a valid result.",
+    "- file: repo-relative path exactly as in the changelist.",
+    "- line: line number in the NEW file version, derived from the hunk header (@@ -a,b +c,d @@). Use null when the finding is not tied to one line.",
+    "- severity: one of vulnerability | major | minor | nit | info, matching the focus areas above.",
+    "- comment: 1-3 concrete sentences explaining why it is a problem. suggestion: optional replacement code.",
+    "- Do not report issues in unchanged code unless directly caused by this diff.",
+    "- Do not report the same issue twice; merge duplicates into one finding.",
+  ].join("\n");
+}
+
+export function buildFirstUserMessage(
   bundle: PrBundle,
   options: ReviewOptions,
   repoContext: string | null,
-): { system: string; user: string } {
-  const system = [
-    "You are squanchy, a precise senior code reviewer. Review the pull request diff and report findings.",
-    "Focus areas for this review:",
-    ...options.depths.map((d) => `- ${FOCUS_TEXT[d]}`),
-    "Rules:",
-    "- Only report issues grounded in the diff. Cite file path and the line number in the NEW file version (derive it from the hunk header). Use line: null if the finding is not tied to one line.",
-    "- severity must be one of: vulnerability | major | minor | nit | info, matching the focus area.",
-    "- If nothing to report, return an empty findings array. Do not invent issues.",
-    '- Respond ONLY with JSON: {"overview": string|null, "findings": [{"severity": ..., "file": ..., "line": ..., "comment": ..., "suggestion": ...}]}',
-    "- overview is null unless the 'full' focus is active.",
-  ].join("\n");
-
-  const user = [
+): string {
+  const sections: string[] = [];
+  let spent = 0;
+  for (const f of bundle.files) {
+    const header = `## ${f.path} (${f.status}, +${f.additions}/-${f.deletions})`;
+    if (f.patch !== undefined && spent + f.patch.length <= INLINE_DIFF_BUDGET) {
+      spent += f.patch.length;
+      sections.push(`${header}\n\`\`\`diff\n${f.patch}\n\`\`\``);
+    } else if (f.patch !== undefined) {
+      sections.push(`${header}\n(diff not inlined for size — fetch it with get_file_diff)`);
+    } else {
+      sections.push(`${header}\n(no patch: binary or dropped by the size budget — use read_file at the head commit if needed)`);
+    }
+  }
+  return [
     repoContext ? `# Repository context\n${repoContext}\n` : "",
-    `# PR\nrepo: ${bundle.repo}\nnumber: ${bundle.prNumber}\ntitle: ${bundle.title}\nauthor: ${bundle.author}\n`,
+    `# Pull request\nrepo: ${bundle.repo}\nnumber: ${bundle.prNumber}\ntitle: ${bundle.title}\nauthor: ${bundle.author}\nhead commit: ${bundle.headSha}\n`,
     bundle.body ? `description:\n${bundle.body}\n` : "",
     options.overview ? `user-provided PR overview (treat as ground truth):\n${options.overview}\n` : "",
-    bundle.truncated ? "(note: the diff was truncated for size; review what is present)\n" : "",
-    "# Diff\n",
-    ...bundle.files.map(
-      (f) =>
-        `## ${f.path} (${f.status}, +${f.additions}/-${f.deletions})\n` +
-        "```diff\n" +
-        (f.patch ?? "(binary or no patch)") +
-        "\n```\n",
-    ),
+    bundle.truncated ? "(note: some patches were dropped by the size budget; read_file at the head commit still works)\n" : "",
+    `# Changed files (${bundle.files.length})\n`,
+    ...sections,
   ]
     .filter(Boolean)
     .join("\n");
-
-  return { system, user };
 }

@@ -36,4 +36,5 @@ export interface SquanchyConfig {
   githubToken?: string;
   defaultModel: string;
   defaultDepths: Depth[];
+  maxSteps: number;
 }
