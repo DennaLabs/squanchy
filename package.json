@@ -1,8 +1,10 @@
 {
   "name": "squanchy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
-  "bin": { "squanchy": "./bin/squanchy.ts" },
+  "bin": {
+    "squanchy": "./bin/squanchy.ts"
+  },
   "scripts": {
     "dev": "bun run bin/squanchy.ts",
     "test": "bun test",
