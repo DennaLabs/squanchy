@@ -42,7 +42,18 @@ export function createCliSnapshot(
 
 export async function run(argv: string[]): Promise<void> {
   const program = new Command();
-  program.name("squanchy").description("AI code review for PRs").version(pkg.version);
+  program
+    .name("squanchy")
+    .description("AI code review for PRs")
+    .version(pkg.version)
+    .showHelpAfterError("(run `squanchy --help` for usage)")
+    .addHelpText(
+      "after",
+      "\nQuickstart:\n" +
+        "  1. squanchy init                 # set API keys + generate repo context\n" +
+        "  2. squanchy review <pr-url>      # terminal report (nothing posted)\n" +
+        "  3. squanchy review <pr-url> --mode review   # post comments on the PR\n",
+    );
 
   program
     .command("review")
@@ -126,5 +137,9 @@ export async function run(argv: string[]): Promise<void> {
       });
     });
 
+  if (argv.length <= 2) {
+    program.outputHelp();
+    return;
+  }
   await program.parseAsync(argv);
 }

@@ -9,13 +9,38 @@ Two interfaces:
 
 ## Install
 
+### Prebuilt binary (recommended)
+
+```
+curl -fsSL https://raw.githubusercontent.com/crampeddamselfly/squanchy/main/install.sh | bash
+```
+
+Downloads the latest release binary for your platform (Linux x64/arm64, macOS x64/arm64, Windows x64) into `~/.local/bin`. No Bun, no Node, no project required — `squanchy` just works in your terminal. Verify with `squanchy --version`.
+
+Options: `SQUANCHY_VERSION=v0.3.0` to pin a version, `INSTALL_DIR=~/bin` to change the destination. While this repo is private, the installer needs a token:
+
+```
+curl -fsSL https://raw.githubusercontent.com/crampeddamselfly/squanchy/main/install.sh | GITHUB_TOKEN=*** bash
+```
+
+### From source
+
 Requires [Bun](https://bun.sh) 1.2+.
 
 ```
-git clone <this repo> && cd squanchy
+git clone git@github.com:crampeddamselfly/squanchy.git && cd squanchy
 bun install
-bun link            # puts `squanchy` on your PATH
+bun run build                                        # cross-compiles all platforms into dist/
+cp dist/squanchy-linux-x64 ~/.local/bin/squanchy     # pick your platform
 ```
+
+### Dev mode (bun link)
+
+```
+bun install && bun link
+```
+
+This registers `squanchy` in `~/.bun/bin` — make sure that directory is on your `PATH` (the Bun installer normally adds it to your shell rc; open a new terminal after installing Bun).
 
 ## Setup
 
@@ -138,7 +163,7 @@ What happens on a trigger: 👀 reaction on your comment → agent review → on
 
 ## Releases & CI
 
-- **Releases** are automated with [semantic-release](https://semantic-release.gitbook.io): every push to `main` analyzes conventional commits (`feat:` → minor, `fix:` → patch, `BREAKING CHANGE` → major) and creates the version bump commit (`chore(release): vX.Y.Z [skip ci]`), `CHANGELOG.md` entry, git tag, and GitHub Release. Nothing is published to npm. Action users pin those tags.
+- **Releases** are automated with [semantic-release](https://semantic-release.gitbook.io): every push to `main` analyzes conventional commits (`feat:` → minor, `fix:` → patch, `BREAKING CHANGE` → major) and creates the version bump commit (`chore(release): vX.Y.Z [skip ci]`), `CHANGELOG.md` entry, git tag, and GitHub Release. Each release cross-compiles and attaches self-contained binaries (`squanchy-linux-x64`, `-linux-arm64`, `-darwin-x64`, `-darwin-arm64`, `-windows-x64.exe`) — these are what `install.sh` downloads. Nothing is published to npm. Action users pin those tags.
 - **CI** (`.github/workflows/ci.yml`) runs typecheck + unit tests on every push to `main` and every PR.
 - **Dependabot** (`.github/dependabot.yml`) opens grouped weekly PRs for `bun` and `github-actions` ecosystems, with 7-day cooldowns (30 for majors) and a 7-day minimum package age (`bunfig.toml`) as supply-chain hardening. Production dependency bumps use `fix(deps):` and therefore ship as patch releases.
 - **Security audit**: a daily workflow runs `bun audit` and files (or updates) a single tracking issue when it finds anything.

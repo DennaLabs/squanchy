@@ -7,6 +7,7 @@
     "dev": "bun run bin/squanchy.ts",
     "test": "bun test",
     "typecheck": "bun ./node_modules/typescript/bin/tsc --noEmit",
+    "build": "bun run scripts/build-binaries.ts",
     "release": "semantic-release"
   },
   "dependencies": {
