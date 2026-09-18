@@ -1,0 +1,50 @@
+# squanchy: AI code review triggered by PR comments.
+#
+# Setup:
+#   1. Copy this file to .github/workflows/squanchy.yml in your repo (DEFAULT branch —
+#      issue_comment workflows never run from PR branches).
+#   2. Add an `OPENROUTER_API_KEY` repository secret (https://openrouter.ai/settings/keys).
+#   3. Optionally run `squanchy init` locally and commit `.squanchy/` (defaults + repo
+#      context) so reviews know your stack.
+#   4. On any PR, comment: /squanchy review   (or /squanchy help for the full grammar)
+#
+# Replace <squanchy-owner> below with the GitHub owner of the squanchy repo.
+
+name: squanchy
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  squanchy:
+    # only PR comments that start with /squanchy, from trusted authors
+    if: >
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/squanchy') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # check out the PR head so squanchy can read repo context (.squanchy/context.md)
+      # and inspect full files; works for same-repo and fork PRs alike
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+
+      - name: squanchy review
+        uses: <squanchy-owner>/squanchy@main
+        with:
+          comment: ${{ github.event.comment.body }}
+          comment_id: ${{ github.event.comment.id }}
+          pr_url: ${{ github.event.issue.pull_request.html_url }}
+          author_association: ${{ github.event.comment.author_association }}
+          # optional workflow-level defaults (comment flags still override these):
+          # model: anthropic/claude-sonnet-4.5
+          # depth: vulnerabilities,major
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

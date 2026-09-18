@@ -1,0 +1,68 @@
+name: "squanchy review"
+description: "AI code review for PRs, triggered by /squanchy comments. Powered by OpenRouter."
+author: "squanchy"
+
+inputs:
+  comment:
+    description: "Body of the triggering comment"
+    required: true
+  comment_id:
+    description: "ID of the triggering comment (for the reaction ack)"
+    required: true
+  pr_url:
+    description: "html_url of the pull request"
+    required: true
+  author_association:
+    description: "author_association of the commenter (OWNER/MEMBER/COLLABORATOR allowed)"
+    required: true
+  model:
+    description: "OpenRouter model id (overrides repo config)"
+    required: false
+  depth:
+    description: "Default depth csv: vulnerabilities,major,minor,nits,full (overrides repo config)"
+    required: false
+  max_steps:
+    description: "Max agent steps per review (overrides repo config)"
+    required: false
+  openrouter_api_key:
+    description: >
+      Optional OpenRouter API key input. If empty, the OPENROUTER_API_KEY environment
+      variable inherited from the calling workflow step is used (recommended).
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: latest
+
+    - name: Install squanchy dependencies
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: bun install --frozen-lockfile
+
+    - name: Run squanchy review
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        SQUANCHY_COMMENT: ${{ inputs.comment }}
+        SQUANCHY_COMMENT_ID: ${{ inputs.comment_id }}
+        SQUANCHY_PR_URL: ${{ inputs.pr_url }}
+        SQUANCHY_AUTHOR_ASSOCIATION: ${{ inputs.author_association }}
+        SQUANCHY_MODEL: ${{ inputs.model }}
+        SQUANCHY_DEPTH: ${{ inputs.depth }}
+        SQUANCHY_MAX_STEPS: ${{ inputs.max_steps }}
+        SQUANCHY_KEY_INPUT: ${{ inputs.openrouter_api_key }}
+      run: |
+        # the input wins when set; otherwise OPENROUTER_API_KEY / GITHUB_TOKEN
+        # are inherited from the calling workflow step's env untouched
+        if [ -n "$SQUANCHY_KEY_INPUT" ]; then
+          export OPENROUTER_API_KEY="$SQUANCHY_KEY_INPUT"
+        fi
+        bun run src/action/main.ts
+
+branding:
+  icon: "message-square"
+  color: "orange"
