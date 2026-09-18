@@ -59,4 +59,11 @@ describe("linesInDiff", () => {
   test("empty patch", () => {
     expect(linesInDiff("").size).toBe(0);
   });
+
+  test("no-newline markers do not consume line numbers", () => {
+    const patch = ["@@ -1,2 +1,2 @@", "-old", "\\ No newline at end of file", "+new", "\\ No newline at end of file"].join(
+      "\n",
+    );
+    expect([...linesInDiff(patch)]).toEqual([1]);
+  });
 });

@@ -61,6 +61,8 @@ export function linesInDiff(patch: string): Set<number> {
     if (raw.startsWith("+")) {
       lines.add(current);
       current += 1;
+    } else if (raw.startsWith("\\")) {
+      // "\ No newline at end of file" marker: consumes no line number on either side
     } else if (raw.startsWith("-")) {
       // removed line: no new-side number consumed
     } else {

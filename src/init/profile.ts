@@ -91,9 +91,8 @@ export async function runInit(deps: InitDeps): Promise<void> {
   if (!ghToken) ghToken = (await deps.promptSecret("GitHub personal token (for CLI use)")) ?? undefined;
   if (!ghToken) log("note: no GitHub token provided; `squanchy review` will need GITHUB_TOKEN later");
 
-  const globalCfg: Partial<SquanchyConfig> = {};
-  Object.assign(globalCfg, { ["openrouter" + "ApiKey"]: orKey });
-  if (ghToken) Object.assign(globalCfg, { ["github" + "Token"]: ghToken });
+  const globalCfg: Partial<SquanchyConfig> = { openrouterApiKey: orKey };
+  if (ghToken) globalCfg.githubToken = ghToken;
   saveGlobalConfig(globalDir, globalCfg);
   log(`saved secrets to ${join(globalDir, "config.json")} (mode 600)`);
 
@@ -143,8 +142,13 @@ export async function runInit(deps: InitDeps): Promise<void> {
     .filter(Boolean)
     .join("\n\n");
 
-  const chatArgs = { model, system, user, temperature: 0.3 } as Parameters<typeof chatFn>[0];
-  Object.assign(chatArgs, { ["api" + "Key"]: orKey });
+  const chatArgs: Parameters<typeof chatFn>[0] = {
+    apiKey: orKey,
+    model,
+    system,
+    user,
+    temperature: 0.3,
+  };
   const summary = await chatFn(chatArgs);
 
   writeFileSync(join(repoDir, ".squanchy", "context.md"), buildContextMd(stack, summary));

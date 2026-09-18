@@ -17,4 +17,8 @@ describe("parseDepths", () => {
   test("dedupes and trims", () => {
     expect(parseDepths(" major , nits ,major ")).toEqual(["major", "nits"]);
   });
+  test("rejects empty list", () => {
+    expect(() => parseDepths("")).toThrow(/[Ee]mpty/);
+    expect(() => parseDepths(" , ")).toThrow(/[Ee]mpty/);
+  });
 });
