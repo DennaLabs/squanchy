@@ -16,6 +16,7 @@ import { GitRefSnapshot } from "./snapshot/git-ref";
 import { TarballSnapshot, githubTarballDownloader } from "./snapshot/tarball";
 import type { RepoSnapshot } from "./snapshot/snapshot";
 import { ModeSchema, type ReviewOptions } from "./types";
+import pkg from "../package.json";
 
 export function globalConfigDir(): string {
   return join(homedir(), ".config", "squanchy");
@@ -41,7 +42,7 @@ export function createCliSnapshot(
 
 export async function run(argv: string[]): Promise<void> {
   const program = new Command();
-  program.name("squanchy").description("AI code review for PRs").version("0.2.0");
+  program.name("squanchy").description("AI code review for PRs").version(pkg.version);
 
   program
     .command("review")

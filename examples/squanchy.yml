@@ -31,12 +31,13 @@ jobs:
       # check out the PR head so squanchy can read repo context (.squanchy/context.md)
       # and inspect full files; works for same-repo and fork PRs alike
       - name: Checkout PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/pull/${{ github.event.issue.number }}/head
 
       - name: squanchy review
-        uses: <squanchy-owner>/squanchy@main
+        # pin to the latest release tag (see the squanchy repo's Releases page)
+        uses: <squanchy-owner>/squanchy@v0.2.0
         with:
           comment: ${{ github.event.comment.body }}
           comment_id: ${{ github.event.comment.id }}

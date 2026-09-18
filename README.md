@@ -103,7 +103,7 @@ squanchy also runs as a GitHub Action: comment `/squanchy review` on a PR and it
 
 ### Install
 
-1. Copy [`examples/squanchy.yml`](examples/squanchy.yml) to `.github/workflows/squanchy.yml` on your **default branch** (GitHub only runs `issue_comment` workflows from the default branch) and replace `<squanchy-owner>` with the owner of the squanchy repo (or pin `@v0.2.0` once released).
+1. Copy [`examples/squanchy.yml`](examples/squanchy.yml) to `.github/workflows/squanchy.yml` on your **default branch** (GitHub only runs `issue_comment` workflows from the default branch) and replace `<squanchy-owner>` with the owner of the squanchy repo, pinned to a release tag from the [Releases page](../../releases) (e.g. `@v0.2.0`).
 2. Add an `OPENROUTER_API_KEY` repository secret.
 3. Optionally commit `.squanchy/` (run `squanchy init` locally) so bot reviews use your repo defaults and context.
 
@@ -135,6 +135,13 @@ What happens on a trigger: 👀 reaction on your comment → agent review → on
 - The fetched diff is capped at 150k characters of patch text and the first prompt inlines up to 60k; the agent can still fetch remaining patches per file, and full file contents are always available via `read_file`.
 - Inline comments are only posted on lines present in the diff (GitHub rejects the rest); other findings appear in the review summary body.
 - Secrets live only in `~/.config/squanchy/config.json` (mode 600) or env vars. Never commit keys; `.squanchy/config.json` in the repo ignores secret fields by design.
+
+## Releases & CI
+
+- **Releases** are automated with [semantic-release](https://semantic-release.gitbook.io): every push to `main` analyzes conventional commits (`feat:` → minor, `fix:` → patch, `BREAKING CHANGE` → major) and creates the version bump commit (`chore(release): vX.Y.Z [skip ci]`), `CHANGELOG.md` entry, git tag, and GitHub Release. Nothing is published to npm. Action users pin those tags.
+- **CI** (`.github/workflows/ci.yml`) runs typecheck + unit tests on every push to `main` and every PR.
+- **Dependabot** (`.github/dependabot.yml`) opens grouped weekly PRs for `bun` and `github-actions` ecosystems, with 7-day cooldowns (30 for majors) and a 7-day minimum package age (`bunfig.toml`) as supply-chain hardening. Production dependency bumps use `fix(deps):` and therefore ship as patch releases.
+- **Security audit**: a daily workflow runs `bun audit` and files (or updates) a single tracking issue when it finds anything.
 
 ## Development
 
