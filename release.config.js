@@ -11,6 +11,13 @@ export default {
       },
     ],
     [
+      // build AFTER the npm plugin bumped package.json, so binaries embed the new version
+      "@semantic-release/exec",
+      {
+        prepareCommand: "bun run build",
+      },
+    ],
+    [
       "@semantic-release/git",
       {
         assets: ["package.json", "CHANGELOG.md"],
