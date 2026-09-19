@@ -12,9 +12,10 @@ export default {
     ],
     [
       // build AFTER the npm plugin bumped package.json, so binaries embed the new version
+      // NOTE: exec v7 option is `prepareCmd` (`prepareCommand` is silently ignored!)
       "@semantic-release/exec",
       {
-        prepareCommand: "bun run build",
+        prepareCmd: "bun run build",
       },
     ],
     [
