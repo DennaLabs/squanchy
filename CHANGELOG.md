@@ -1,3 +1,10 @@
+## [0.3.2](https://github.com/crampeddamselfly/squanchy/compare/v0.3.1...v0.3.2) (2026-09-19)
+
+
+### Bug Fixes
+
+* use exec v7 prepareCmd option so release binaries are actually built ([0118fd3](https://github.com/crampeddamselfly/squanchy/commit/0118fd3010231e57ba4618222f7201e07915ed92))
+
 ## [0.3.1](https://github.com/crampeddamselfly/squanchy/compare/v0.3.0...v0.3.1) (2026-09-19)
 
 
