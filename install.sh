@@ -47,7 +47,8 @@ auth=()
 say "downloading $asset ($VERSION) ..."
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-if ! curl -fsSL "${auth[@]}" -o "$tmp/$asset" "$url"; then
+# ${auth[@]+...} guards against "unbound variable" on empty arrays in bash 3.2 (macOS) under set -u
+if ! curl -fsSL ${auth[@]+"${auth[@]}"} -o "$tmp/$asset" "$url"; then
   if [ -z "$TOKEN" ]; then
     die "download failed. If the repo is private, retry with: GITHUB_TOKEN=*** curl ... | bash"
   fi
