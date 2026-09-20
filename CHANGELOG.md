@@ -1,3 +1,10 @@
+# [0.4.0](https://github.com/crampeddamselfly/squanchy/compare/v0.3.2...v0.4.0) (2026-09-20)
+
+
+### Features
+
+* guided init with clack UI - credential reuse, depth/model/max-steps prompts, live model picker ([9b926f9](https://github.com/crampeddamselfly/squanchy/commit/9b926f91f357b9d7134605a4b1bed008457f7393))
+
 ## [0.3.2](https://github.com/crampeddamselfly/squanchy/compare/v0.3.1...v0.3.2) (2026-09-19)
 
 
