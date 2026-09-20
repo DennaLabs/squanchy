@@ -1,10 +1,20 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { saveGlobalConfig, DEFAULT_MODEL } from "../config";
+import { z } from "zod";
+import { DEFAULT_MAX_STEPS, DEFAULT_MODEL, saveGlobalConfig } from "../config";
 import { chat as realChat } from "../openrouter/client";
-import { parseDepths } from "../review/depth";
+import { fetchModelOptions } from "../openrouter/models";
+import { DEFAULT_DEPTHS, parseDepths } from "../review/depth";
+import type { Depth, SquanchyConfig } from "../types";
 import { detectStack, type StackInfo } from "./detect-stack";
-import type { SquanchyConfig } from "../types";
+import {
+  plainReporter,
+  type AskInit,
+  type ExistingSecrets,
+  type InitAnswers,
+  type InitPromptState,
+  type Reporter,
+} from "./prompts";
 
 const MAX_FILES = 2000;
 const KEY_FILES = ["package.json", "tsconfig.json", "Dockerfile", "bunfig.toml", "go.mod", "pyproject.toml"];
@@ -14,6 +24,7 @@ export interface InitFlags {
   githubToken?: string;
   model?: string;
   depth?: string;
+  maxSteps?: number;
 }
 
 export interface InitDeps {
@@ -21,10 +32,72 @@ export interface InitDeps {
   globalDir: string;
   env: Record<string, string | undefined>;
   flags: InitFlags;
-  /** returns null when non-interactive */
-  promptSecret: (label: string) => Promise<string | null>;
+  /** when true, collect settings via askInit; otherwise resolve from flags/env/existing config only */
+  interactive: boolean;
+  askInit: AskInit;
+  fetchModels?: (apiKey: string) => Promise<Awaited<ReturnType<typeof fetchModelOptions>>>;
+  report?: Reporter;
   chatFn?: typeof realChat;
-  log?: (msg: string) => void;
+}
+
+const GlobalFileSchema = z.object({
+  openrouterApiKey: z.string().optional(),
+  githubToken: z.string().optional(),
+});
+
+const RepoFileSchema = z.object({
+  defaultModel: z.string().optional(),
+  defaultDepths: z.array(z.string()).optional(),
+  maxSteps: z.number().int().positive().optional(),
+});
+
+export function readExistingSecrets(
+  globalDir: string,
+  env: Record<string, string | undefined>,
+): ExistingSecrets | null {
+  const path = join(globalDir, "config.json");
+  const file = existsSync(path) ? GlobalFileSchema.parse(JSON.parse(readFileSync(path, "utf8"))) : {};
+  const openrouterApiKey = env.OPENROUTER_API_KEY ?? file.openrouterApiKey;
+  const githubToken = env.GITHUB_TOKEN ?? file.githubToken;
+  if (!openrouterApiKey && !githubToken) return null;
+  const source = env.OPENROUTER_API_KEY ? "environment" : path;
+  return { openrouterApiKey, githubToken, source };
+}
+
+export function readRepoDefaults(repoDir: string): { model: string; depths: Depth[]; maxSteps: number } {
+  const path = join(repoDir, ".squanchy", "config.json");
+  const file = existsSync(path) ? RepoFileSchema.parse(JSON.parse(readFileSync(path, "utf8"))) : {};
+  return {
+    model: file.defaultModel ?? DEFAULT_MODEL,
+    depths: file.defaultDepths ? parseDepths(file.defaultDepths.join(",")) : [...DEFAULT_DEPTHS],
+    maxSteps: file.maxSteps ?? DEFAULT_MAX_STEPS,
+  };
+}
+
+/** flags > env > existing stored secrets > error; used when not interactive. */
+export function resolveNonInteractive(
+  flags: InitFlags,
+  env: Record<string, string | undefined>,
+  existing: ExistingSecrets | null,
+  defaults: { model: string; depths: Depth[]; maxSteps: number },
+): InitAnswers {
+  const openrouterApiKey = flags.openrouterKey ?? env.OPENROUTER_API_KEY ?? existing?.openrouterApiKey;
+  if (!openrouterApiKey) {
+    throw new Error(
+      "No OpenRouter API key available: pass --openrouter-key, set OPENROUTER_API_KEY, or run `squanchy init` interactively",
+    );
+  }
+  const githubToken = flags.githubToken ?? env.GITHUB_TOKEN ?? existing?.githubToken;
+  const secretsChanged = Boolean(flags.openrouterKey || flags.githubToken);
+  return {
+    openrouterApiKey,
+    githubToken,
+    secretsChanged,
+    saveGlobal: secretsChanged,
+    model: flags.model ?? defaults.model,
+    depths: flags.depth ? parseDepths(flags.depth) : defaults.depths,
+    maxSteps: flags.maxSteps ?? defaults.maxSteps,
+  };
 }
 
 export function listRepoFiles(repoDir: string): string[] {
@@ -78,35 +151,18 @@ export function buildContextMd(stack: StackInfo, summary: string): string {
   ].join("\n");
 }
 
+function stackLineOf(stack: StackInfo, fileCount: number): string {
+  const parts = [...stack.languages, stack.packageManager, stack.testFramework, ...stack.frameworks.slice(0, 3)];
+  const shown = parts.filter(Boolean).slice(0, 5).join(" / ") || "unknown stack";
+  return `${shown} (${fileCount} files)`;
+}
+
 export async function runInit(deps: InitDeps): Promise<void> {
-  const log = deps.log ?? ((m: string) => console.log(m));
+  const report: Reporter = deps.report ?? plainReporter;
   const chatFn = deps.chatFn ?? realChat;
   const { repoDir, globalDir, env, flags } = deps;
 
-  // 1. resolve secrets: flags > env > interactive prompt
-  let orKey = flags.openrouterKey ?? env.OPENROUTER_API_KEY;
-  if (!orKey) orKey = (await deps.promptSecret("OpenRouter API key")) ?? undefined;
-  if (!orKey) throw new Error("No OpenRouter API key given (flag, env OPENROUTER_API_KEY, or prompt)");
-  let ghToken = flags.githubToken ?? env.GITHUB_TOKEN;
-  if (!ghToken) ghToken = (await deps.promptSecret("GitHub personal token (for CLI use)")) ?? undefined;
-  if (!ghToken) log("note: no GitHub token provided; `squanchy review` will need GITHUB_TOKEN later");
-
-  const globalCfg: Partial<SquanchyConfig> = { openrouterApiKey: orKey };
-  if (ghToken) globalCfg.githubToken = ghToken;
-  saveGlobalConfig(globalDir, globalCfg);
-  log(`saved secrets to ${join(globalDir, "config.json")} (mode 600)`);
-
-  // 2. repo defaults (non-secret, committed)
-  const model = flags.model ?? DEFAULT_MODEL;
-  const depths = parseDepths(flags.depth ?? "vulnerabilities,major");
-  mkdirSync(join(repoDir, ".squanchy"), { recursive: true });
-  writeFileSync(
-    join(repoDir, ".squanchy", "config.json"),
-    JSON.stringify({ defaultModel: model, defaultDepths: depths }, null, 2) + "\n",
-  );
-  log(`wrote ${join(repoDir, ".squanchy", "config.json")}`);
-
-  // 3. explore repo
+  // 1. scan the repo first (fast) so the user sees immediate feedback
   const files = listRepoFiles(repoDir);
   const pkgPath = join(repoDir, "package.json");
   let pkg: unknown = null;
@@ -118,9 +174,53 @@ export async function runInit(deps: InitDeps): Promise<void> {
     }
   }
   const stack = detectStack(files, pkg);
-  log(`detected stack: ${stack.languages.join(", ") || "unknown"} (${files.length} files)`);
 
-  // 4. one LLM call to summarize the repo for future reviews
+  // 2. gather current state: stored secrets + repo defaults + flag overrides
+  const existing = readExistingSecrets(globalDir, env);
+  const defaults = readRepoDefaults(repoDir);
+  const state: InitPromptState = {
+    existing,
+    currentModel: flags.model ?? defaults.model,
+    currentDepths: flags.depth ? parseDepths(flags.depth) : defaults.depths,
+    currentMaxSteps: flags.maxSteps ?? defaults.maxSteps,
+    stackLine: stackLineOf(stack, files.length),
+    locked: {
+      credentials: Boolean(flags.openrouterKey && flags.githubToken),
+      model: Boolean(flags.model),
+      depths: Boolean(flags.depth),
+    },
+  };
+
+  // 3. resolve answers (interactive prompts or flags/env/config)
+  const answers = deps.interactive
+    ? await deps.askInit(state, { fetchModels: deps.fetchModels ?? fetchModelOptions })
+    : resolveNonInteractive(flags, env, existing, defaults);
+
+  // 4. persist credentials when they are new and the user asked to save them
+  if (answers.secretsChanged && answers.saveGlobal) {
+    const globalCfg: Partial<SquanchyConfig> = { openrouterApiKey: answers.openrouterApiKey };
+    if (answers.githubToken) globalCfg.githubToken = answers.githubToken;
+    saveGlobalConfig(globalDir, globalCfg);
+    report.info(`saved credentials to ${join(globalDir, "config.json")} (mode 600)`);
+  }
+  if (!answers.githubToken) {
+    report.info("note: no GitHub token configured; `squanchy review` will need GITHUB_TOKEN");
+  }
+
+  // 5. repo config (non-secret, committed)
+  mkdirSync(join(repoDir, ".squanchy"), { recursive: true });
+  const configPath = join(repoDir, ".squanchy", "config.json");
+  writeFileSync(
+    configPath,
+    JSON.stringify(
+      { defaultModel: answers.model, defaultDepths: answers.depths, maxSteps: answers.maxSteps },
+      null,
+      2,
+    ) + "\n",
+  );
+  report.info(`wrote ${configPath} (commit this file)`);
+
+  // 6. LLM pass to summarize the repo (the slow step — keep the user informed)
   const keyFileContents = KEY_FILES.map((kf) => {
     const p = join(repoDir, kf);
     if (!existsSync(p)) return "";
@@ -142,19 +242,26 @@ export async function runInit(deps: InitDeps): Promise<void> {
     .filter(Boolean)
     .join("\n\n");
 
-  const chatArgs: Parameters<typeof chatFn>[0] = {
-    apiKey: orKey,
-    model,
+  report.start(`generating repository context with ${answers.model}`);
+  const summary = await chatFn({
+    apiKey: answers.openrouterApiKey,
+    model: answers.model,
     system,
     user,
     temperature: 0.3,
-  };
-  const summary = await chatFn(chatArgs);
+  });
+  report.stop("repository context generated");
 
-  writeFileSync(join(repoDir, ".squanchy", "context.md"), buildContextMd(stack, summary));
-  log(`wrote ${join(repoDir, ".squanchy", "context.md")} (commit this file)`);
+  const contextPath = join(repoDir, ".squanchy", "context.md");
+  writeFileSync(contextPath, buildContextMd(stack, summary));
+  const kb = (statSync(contextPath).size / 1024).toFixed(1);
+  report.info(`wrote ${contextPath} (${kb} KB — commit this file)`);
 
-  log("\nnext steps:");
-  log("  squanchy review <pr-url>                 # report mode (terminal only)");
-  log("  squanchy review <pr-url> --mode review   # post review comments on the PR");
+  report.done(
+    [
+      "next steps:",
+      "  squanchy review <pr-url>                 # report mode (terminal only)",
+      "  squanchy review <pr-url> --mode review   # post review comments on the PR",
+    ].join("\n"),
+  );
 }

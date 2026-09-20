@@ -1,13 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
 import { Octokit } from "@octokit/rest";
 import { parsePrArg, tryDetectRepoFromGitRemote } from "./args";
 import { loadConfig } from "./config";
 import { postPrReview } from "./github/pr";
 import { runInit, type InitFlags } from "./init/profile";
+import { askInitClack, createClackReporter } from "./init/prompts-clack";
+import { plainReporter } from "./init/prompts";
 import { chatWithTools } from "./openrouter/client";
 import { renderReport } from "./report/render";
 import { DEFAULT_DEPTHS, parseDepths } from "./review/depth";
@@ -109,31 +110,29 @@ export async function run(argv: string[]): Promise<void> {
     .option("--github-token <token>", "GitHub personal token (or env GITHUB_TOKEN)")
     .option("-m, --model <model>", "default openrouter model id")
     .option("-d, --depth <list>", "default depth csv: vulnerabilities,major,minor,nits,full")
+    .option("--max-steps <n>", "max agent steps per review (1-100)")
     .action(async (opts: Record<string, string | undefined>) => {
+      const maxSteps = opts.maxSteps !== undefined ? Number(opts.maxSteps) : undefined;
+      if (maxSteps !== undefined && (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 100)) {
+        throw new Error("--max-steps must be an integer between 1 and 100");
+      }
       const flags: InitFlags = {
+        openrouterKey: opts.openrouterKey,
+        githubToken: opts.githubToken,
         model: opts.model,
         depth: opts.depth,
+        maxSteps,
       };
-      Object.assign(flags, { ["openrouter" + "Key"]: opts["openrouterKey"] });
-      Object.assign(flags, { ["github" + "Token"]: opts["githubToken"] });
-
-      async function promptSecret(label: string): Promise<string | null> {
-        if (!process.stdin.isTTY) return null;
-        const rl = createInterface({ input: process.stdin, output: process.stdout });
-        try {
-          const answer = (await rl.question(`${label} (input is echoed; paste carefully): `)).trim();
-          return answer || null;
-        } finally {
-          rl.close();
-        }
-      }
+      const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 
       await runInit({
         repoDir: process.cwd(),
         globalDir: globalConfigDir(),
         env: process.env as Record<string, string>,
         flags,
-        promptSecret,
+        interactive,
+        askInit: askInitClack,
+        report: interactive ? createClackReporter() : plainReporter,
       });
     });
 

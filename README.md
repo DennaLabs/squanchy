@@ -48,11 +48,18 @@ This registers `squanchy` in `~/.bun/bin` — make sure that directory is on you
 squanchy init
 ```
 
-Init will:
+Init is a guided, interactive flow (powered by [clack](https://github.com/bombshell-dev/clack)):
 
-1. Ask for your OpenRouter API key and GitHub personal token (or take them from `--openrouter-key` / `--github-token` flags, or the `OPENROUTER_API_KEY` / `GITHUB_TOKEN` env vars). Secrets are stored in `~/.config/squanchy/config.json` with mode 600. They are never written into your repo.
-2. Write non-secret defaults (model, depth) to `.squanchy/config.json` in the repo.
-3. Explore the codebase (stack detection + one LLM pass) and generate `.squanchy/context.md`, a repo profile that is injected into every review prompt so squanchy knows what it is dealing with. Commit this file.
+1. **Scan** — detects your stack immediately (languages, package manager, test framework, file count).
+2. **Credentials** — if an OpenRouter key / GitHub token already exist (from a previous repo's init, `~/.config/squanchy/config.json`, or env vars), squanchy offers to **reuse them** — so initializing a second repo only asks about that project. Otherwise it prompts for new ones (masked input) and asks whether to save them globally for future repos. Secrets always live in `~/.config/squanchy/config.json` (mode 600) or env vars — never in your repo.
+3. **Default review depth** — multiselect (vulnerabilities, major, minor, nits, full), preselected from this repo's config.
+4. **Default model** — a picker fed live from OpenRouter `/models` (best free models first, plus curated paid picks, plus "other..." to type any id). Falls back to a plain prompt if offline.
+5. **Advanced** — optionally set max agent steps per review (default 25).
+6. **Context generation** — writes `.squanchy/config.json` (defaults, committed) and generates `.squanchy/context.md` with one LLM pass over your stack + key files (a spinner shows progress). Commit `context.md`: it is injected into every review prompt so squanchy knows what it is dealing with.
+
+Cancel at any prompt and nothing is written. Flags skip prompts for scripting: `squanchy init --openrouter-key *** --github-token *** -m <model> -d <depths> --max-steps <n>`. Without a TTY, init runs non-interactively using flags > env > stored credentials > built-in defaults.
+
+Re-running `squanchy init` in an already-configured repo keeps your values as preselected defaults and regenerates `context.md`.
 
 ## Usage
 
