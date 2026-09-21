@@ -1,3 +1,10 @@
+# [0.5.0](https://github.com/crampeddamselfly/squanchy/compare/v0.4.0...v0.5.0) (2026-09-21)
+
+
+### Features
+
+* live review progress UI + color-coded terminal report ([f32cd2f](https://github.com/crampeddamselfly/squanchy/commit/f32cd2f23fbaa9fc23c22af0ee44f7df40682876))
+
 # [0.4.0](https://github.com/crampeddamselfly/squanchy/compare/v0.3.2...v0.4.0) (2026-09-20)
 
 
