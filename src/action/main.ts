@@ -10,6 +10,7 @@ import type { AssistantMessage, ChatWithToolsArgs } from "../openrouter/client";
 import { parseDepths } from "../review/depth";
 import { runReview } from "../review/run";
 import { FsSnapshot } from "../snapshot/fs";
+import { createReviewProgress } from "../ui/review-progress";
 import { parseBotCommand } from "./command";
 
 /** Only these comment authors may trigger reviews (stops drive-by credit burn). */
@@ -113,6 +114,16 @@ export async function runAction(deps: ActionDeps): Promise<number> {
   }
 
   log(`reviewing ${repo}#${prNumber} (model: ${cmd.options.model}, depths: ${cmd.options.depths.join(",")})`);
+  const progress = createReviewProgress(
+    {
+      info: (m) => log(m),
+      start: (m) => log(m),
+      update: () => {},
+      stop: (m) => log(m),
+      done: (m) => log(m),
+    },
+    { emoji: false },
+  );
   try {
     const result = await runReview(
       { repo, prNumber, ...cmd.options },
@@ -128,6 +139,7 @@ export async function runAction(deps: ActionDeps): Promise<number> {
         postReview: (bundle, res) => postPrReview(octokit, bundle, res),
         maxSteps: env.SQUANCHY_MAX_STEPS ? Number(env.SQUANCHY_MAX_STEPS) : cfg.maxSteps,
         debug: env.SQUANCHY_DEBUG === "1" ? (line) => log(line) : undefined,
+        onProgress: progress.onProgress,
       },
     );
     const url = result.overview?.match(/Posted: (\S+)/)?.[1];

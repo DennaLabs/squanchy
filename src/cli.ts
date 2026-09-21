@@ -7,8 +7,7 @@ import { parsePrArg, tryDetectRepoFromGitRemote } from "./args";
 import { loadConfig } from "./config";
 import { postPrReview } from "./github/pr";
 import { runInit, type InitFlags } from "./init/profile";
-import { askInitClack, createClackReporter } from "./init/prompts-clack";
-import { plainReporter } from "./init/prompts";
+import { askInitClack } from "./init/prompts-clack";
 import { chatWithTools } from "./openrouter/client";
 import { renderReport } from "./report/render";
 import { DEFAULT_DEPTHS, parseDepths } from "./review/depth";
@@ -16,6 +15,8 @@ import { runReview, type RunReviewDeps } from "./review/run";
 import { GitRefSnapshot } from "./snapshot/git-ref";
 import { TarballSnapshot, githubTarballDownloader } from "./snapshot/tarball";
 import type { RepoSnapshot } from "./snapshot/snapshot";
+import { createClackReporter, plainReporter } from "./ui/reporter";
+import { createReviewProgress, printReviewIntro } from "./ui/review-progress";
 import { ModeSchema, type ReviewOptions } from "./types";
 import pkg from "../package.json";
 
@@ -89,6 +90,10 @@ export async function run(argv: string[]): Promise<void> {
         overview: opts.overview,
       };
       const octokit = new Octokit({ auth: githubToken });
+      const interactive = Boolean(process.stdout.isTTY);
+      const reporter = interactive ? createClackReporter() : plainReporter;
+      const progress = createReviewProgress(reporter, { emoji: interactive });
+      if (interactive) printReviewIntro();
       const deps: RunReviewDeps = {
         octokit,
         apiKey,
@@ -98,9 +103,31 @@ export async function run(argv: string[]): Promise<void> {
         postReview: (bundle, res) => postPrReview(octokit, bundle, res),
         maxSteps: cfg.maxSteps,
         debug: process.env.SQUANCHY_DEBUG === "1" ? (line) => console.error(line) : undefined,
+        onProgress: progress.onProgress,
       };
-      const result = await runReview(options, deps);
-      console.log(renderReport(result));
+      let result;
+      try {
+        result = await runReview(options, deps);
+      } catch (err) {
+        reporter.stop(`review failed: ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
+      const m = progress.meta;
+      console.log(
+        renderReport(result, {
+          meta: {
+            repo: m.repo ?? options.repo,
+            prNumber: m.prNumber ?? options.prNumber,
+            title: m.title,
+            mode: options.mode,
+            model: options.model,
+            depths: options.depths,
+            seconds: m.seconds,
+            headSha: m.headSha,
+            postedUrl: m.postedUrl,
+          },
+        }),
+      );
     });
 
   program

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Octokit } from "@octokit/rest";
-import { runReview, type RunReviewDeps } from "../src/review/run";
+import { runReview, type ReviewEvent, type RunReviewDeps } from "../src/review/run";
 import type { AssistantMessage, ChatWithToolsArgs, ToolCall } from "../src/openrouter/client";
 import type { GrepMatch, RepoSnapshot } from "../src/snapshot/snapshot";
 import { fixtureBundle } from "./fixtures/pr-bundle";
@@ -68,12 +68,21 @@ interface Harness {
   chatCalls: ChatWithToolsArgs[];
   snapshotCreated: number;
   snapshotDisposed: number;
+  events: ReviewEvent[];
 }
 
 function makeDeps(script: AssistantMessage[], opts: { maxSteps?: number } = {}): Harness {
   const posted: unknown[] = [];
   const chatCalls: ChatWithToolsArgs[] = [];
-  const h: Harness = { deps: null as unknown as RunReviewDeps, posted, chatCalls, snapshotCreated: 0, snapshotDisposed: 0 };
+  const events: ReviewEvent[] = [];
+  const h: Harness = {
+    deps: null as unknown as RunReviewDeps,
+    posted,
+    chatCalls,
+    snapshotCreated: 0,
+    snapshotDisposed: 0,
+    events,
+  };
   h.deps = {
     octokit: fakeOctokit(),
     apiKey: "test-key",
@@ -92,6 +101,7 @@ function makeDeps(script: AssistantMessage[], opts: { maxSteps?: number } = {}):
       return { htmlUrl: "https://github.com/acme/widgets/pull/42#pullrequestreview-1" };
     },
     maxSteps: opts.maxSteps,
+    onProgress: (e) => events.push(e),
   };
   return h;
 }
@@ -204,5 +214,51 @@ describe("tool ctx wiring", () => {
     expect(h.snapshotCreated).toBe(0);
     const toolMsg = h.chatCalls[1]!.messages.find((m) => m.role === "tool");
     expect(toolMsg?.content).toContain("```diff");
+  });
+});
+
+describe("onProgress lifecycle events", () => {
+  test("report mode: pr-fetch/fetched, agent events, done; no snapshot or posted events", async () => {
+    const h = makeDeps([asst(null, sqliFinding), asst(null, finish)]);
+    await runReview(options, h.deps);
+    const types = h.events.map((e) => e.type);
+    expect(types[0]).toBe("pr-fetch");
+    expect(types[1]).toBe("pr-fetched");
+    expect(types.at(-1)).toBe("done");
+    expect(types).not.toContain("snapshot");
+    expect(types).not.toContain("posted");
+    const fetched = h.events[1] as Extract<ReviewEvent, { type: "pr-fetched" }>;
+    expect(fetched).toMatchObject({
+      repo: "acme/widgets",
+      prNumber: 42,
+      title: "Add login endpoint",
+      files: 2,
+      additions: 4,
+      deletions: 1,
+      headSha: "bbb222",
+    });
+    expect(h.events.some((e) => e.type === "agent")).toBe(true);
+    const done = h.events.at(-1) as Extract<ReviewEvent, { type: "done" }>;
+    expect(done.findings).toBe(1);
+    expect(done.seconds).toBeGreaterThanOrEqual(0);
+  });
+
+  test("snapshot event fires lazily with the backend kind", async () => {
+    const read = toolCall("c1", "read_file", { path: "src/login.ts" });
+    const h = makeDeps([asst(null, read), asst(null, finish)]);
+    await runReview(options, h.deps);
+    const snapshot = h.events.find((e) => e.type === "snapshot");
+    expect(snapshot).toEqual({ type: "snapshot", kind: "fs" });
+    const snapshotIdx = h.events.indexOf(snapshot!);
+    expect(snapshotIdx).toBeGreaterThan(h.events.findIndex((e) => e.type === "pr-fetched"));
+  });
+
+  test("review mode emits posted before done", async () => {
+    const h = makeDeps([asst(null, sqliFinding), asst(null, finish)]);
+    await runReview({ ...options, mode: "review" }, h.deps);
+    const posted = h.events.find((e) => e.type === "posted") as Extract<ReviewEvent, { type: "posted" }>;
+    expect(posted.url).toBe("https://github.com/acme/widgets/pull/42#pullrequestreview-1");
+    expect(posted.findings).toBe(1);
+    expect(h.events.indexOf(posted)).toBeLessThan(h.events.findIndex((e) => e.type === "done"));
   });
 });

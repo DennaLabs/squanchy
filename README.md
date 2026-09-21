@@ -123,7 +123,7 @@ Repo files are read through a snapshot of the **PR head commit**, picked automat
 - `tarball`: the PR is in some other repo — the head-commit tarball is downloaded once to a temp dir and removed after the review.
 - `fs`: used by the GitHub Action, where the workflow already checked out the PR head.
 
-Set `SQUANCHY_DEBUG=1` to trace every agent step (model calls, tool calls, outcomes) on stderr.
+While a review runs, the terminal shows a live progress spinner with what squanchy is doing in general terms — fetching the PR, reading files, searching the repo, step/finding counters, elapsed time. The final report is color-coded by severity (▲ purple vulnerability, ✖ red major, ◆ orange minor, ▸ yellow nit, ○ cyan info), with clickable `file:line` links to the blob at the PR head and an OSC-8-capable terminal. Set `SQUANCHY_DEBUG=1` to trace every agent step (model calls, tool calls, outcomes) on stderr; non-TTY output stays plain for CI logs.
 
 ## Configuration precedence
 

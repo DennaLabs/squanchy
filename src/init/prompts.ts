@@ -1,6 +1,9 @@
 import type { ModelOption } from "../openrouter/models";
 import type { Depth } from "../types";
 
+export type { Reporter } from "../ui/reporter";
+export { plainReporter } from "../ui/reporter";
+
 export interface ExistingSecrets {
   openrouterApiKey?: string;
   githubToken?: string;
@@ -38,23 +41,6 @@ export interface AskInitHelpers {
 }
 
 export type AskInit = (state: InitPromptState, helpers: AskInitHelpers) => Promise<InitAnswers>;
-
-/** Progress output seam: clack spinner when interactive, plain lines otherwise. */
-export interface Reporter {
-  info(msg: string): void;
-  start(msg: string): void;
-  update(msg: string): void;
-  stop(msg: string): void;
-  done(msg: string): void;
-}
-
-export const plainReporter: Reporter = {
-  info: (m) => console.log(m),
-  start: (m) => console.log(`${m} ...`),
-  update: () => {},
-  stop: (m) => console.log(m),
-  done: (m) => console.log(m),
-};
 
 export function maskSecret(secret: string): string {
   return secret.length <= 10 ? "***" : `${secret.slice(0, 6)}...${secret.slice(-4)}`;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { runAgentLoop, type AgentLoopDeps } from "../src/agent/loop";
+import { runAgentLoop, type AgentEvent, type AgentLoopDeps } from "../src/agent/loop";
 import type { AssistantMessage, ChatWithToolsArgs, ToolCall } from "../src/openrouter/client";
 import type { ToolCtx } from "../src/agent/tools";
 import { fixtureBundle } from "./fixtures/pr-bundle";
@@ -129,5 +129,52 @@ describe("runAgentLoop", () => {
     expect(calls[0]!.tools!.length).toBe(6);
     expect(calls[0]!.temperature).toBe(0.2);
     expect(calls[0]!.model).toBe("m");
+  });
+
+  test("onEvent emits the full lifecycle sequence", async () => {
+    const events: AgentEvent[] = [];
+    const { deps } = makeDeps(
+      [
+        asst(null, toolCall("a", "submit_finding", { severity: "major", file: "src/login.ts", line: 3, comment: "bug" })),
+        asst(null, toolCall("b", "finish_review", {})),
+      ],
+      { onEvent: (e) => events.push(e) },
+    );
+    await runAgentLoop(deps);
+    expect(events.map((e) => e.type)).toEqual(["step", "tool-call", "finding", "step", "tool-call", "finished"]);
+    expect(events[0]).toEqual({ type: "step", n: 1, maxSteps: 10 });
+    expect(events[1]).toEqual({ type: "tool-call", name: "submit_finding", summary: "" });
+    expect(events[2]).toEqual({ type: "finding", severity: "major", file: "src/login.ts" });
+    expect(events[5]).toEqual({ type: "finished", reason: "finished", findings: 1, stepsUsed: 2 });
+  });
+
+  test("tool-call events carry path/pattern summaries", async () => {
+    const events: AgentEvent[] = [];
+    const { deps } = makeDeps(
+      [
+        asst(null, toolCall("a", "read_file", { path: "src/a.ts" }), toolCall("b", "grep", { pattern: "db.run" })),
+        asst(null, toolCall("c", "finish_review", {})),
+      ],
+      { onEvent: (e) => events.push(e) },
+    );
+    await runAgentLoop(deps);
+    const toolEvents = events.filter((e) => e.type === "tool-call");
+    expect(toolEvents[0]).toEqual({ type: "tool-call", name: "read_file", summary: "src/a.ts" });
+    expect(toolEvents[1]).toEqual({ type: "tool-call", name: "grep", summary: "db.run" });
+  });
+
+  test("max-steps and text-only endings also emit finished", async () => {
+    const cutoff: AgentEvent[] = [];
+    const { deps: d1 } = makeDeps([asst(null, toolCall("a", "finish_review", {}))], {
+      maxSteps: 2,
+      onEvent: (e) => cutoff.push(e),
+    });
+    await runAgentLoop(d1);
+    expect(cutoff.at(-1)).toMatchObject({ type: "finished", reason: "finished" });
+
+    const textOnly: AgentEvent[] = [];
+    const { deps: d2 } = makeDeps([asst("hmm"), asst("still thinking")], { onEvent: (e) => textOnly.push(e) });
+    await runAgentLoop(d2);
+    expect(textOnly.at(-1)).toMatchObject({ type: "finished", reason: "text-only", findings: 0 });
   });
 });
