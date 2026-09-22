@@ -71,7 +71,7 @@ export async function fetchModelOptions(apiKey: string, http: HttpDeps = {}): Pr
   const res = await fetchFn(MODELS_URL, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
-      "HTTP-Referer": "https://github.com/squanchy",
+      "HTTP-Referer": "https://github.com/DennaLabs/squanchy",
       "X-Title": "squanchy",
     },
     signal: AbortSignal.timeout(TIMEOUT_MS),

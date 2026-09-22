@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # squanchy installer — downloads a prebuilt binary from GitHub Releases into ~/.local/bin.
 #
-#   curl -fsSL https://raw.githubusercontent.com/crampeddamselfly/squanchy/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/DennaLabs/squanchy/main/install.sh | bash
 #
 # Options (env vars):
 #   SQUANCHY_VERSION   install a specific version, e.g. v0.3.0 (default: latest)
@@ -9,7 +9,7 @@
 #   GITHUB_TOKEN       needed while the repo is private (also honors GH_TOKEN)
 set -euo pipefail
 
-REPO="crampeddamselfly/squanchy"
+REPO="DennaLabs/squanchy"
 VERSION="${SQUANCHY_VERSION:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"

@@ -12,7 +12,7 @@ Two interfaces:
 ### Prebuilt binary (recommended)
 
 ```
-curl -fsSL https://raw.githubusercontent.com/crampeddamselfly/squanchy/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DennaLabs/squanchy/main/install.sh | bash
 ```
 
 Downloads the latest release binary for your platform (Linux x64/arm64, macOS x64/arm64, Windows x64) into `~/.local/bin`. No Bun, no Node, no project required — `squanchy` just works in your terminal. Verify with `squanchy --version`.
@@ -20,7 +20,7 @@ Downloads the latest release binary for your platform (Linux x64/arm64, macOS x6
 Options: `SQUANCHY_VERSION=v0.3.0` to pin a version, `INSTALL_DIR=~/bin` to change the destination. While this repo is private, the installer needs a token:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/crampeddamselfly/squanchy/main/install.sh | GITHUB_TOKEN=*** bash
+curl -fsSL https://raw.githubusercontent.com/DennaLabs/squanchy/main/install.sh | GITHUB_TOKEN=*** bash
 ```
 
 ### From source
@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/crampeddamselfly/squanchy/main/inst
 Requires [Bun](https://bun.sh) 1.2+.
 
 ```
-git clone git@github.com:crampeddamselfly/squanchy.git && cd squanchy
+git clone git@github.com:DennaLabs/squanchy.git && cd squanchy
 bun install
 bun run build                                        # cross-compiles all platforms into dist/
 cp dist/squanchy-linux-x64 ~/.local/bin/squanchy     # pick your platform
@@ -135,7 +135,7 @@ squanchy also runs as a GitHub Action: comment `/squanchy review` on a PR and it
 
 ### Install
 
-1. Copy [`examples/squanchy.yml`](examples/squanchy.yml) to `.github/workflows/squanchy.yml` on your **default branch** (GitHub only runs `issue_comment` workflows from the default branch) and replace `<squanchy-owner>` with the owner of the squanchy repo, pinned to a release tag from the [Releases page](../../releases) (e.g. `@v0.2.0`).
+1. Copy [`examples/squanchy.yml`](examples/squanchy.yml) to `.github/workflows/squanchy.yml` on your **default branch** (GitHub only runs `issue_comment` workflows from the default branch). Keep the `uses: DennaLabs/squanchy@vX.Y.Z` line pinned to the latest tag from the [Releases page](https://github.com/DennaLabs/squanchy/releases).
 2. Add an `OPENROUTER_API_KEY` repository secret.
 3. Optionally commit `.squanchy/` (run `squanchy init` locally) so bot reviews use your repo defaults and context.
 

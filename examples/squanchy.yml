@@ -8,7 +8,7 @@
 #      context) so reviews know your stack.
 #   4. On any PR, comment: /squanchy review   (or /squanchy help for the full grammar)
 #
-# Replace <squanchy-owner> below with the GitHub owner of the squanchy repo.
+# Keep the `uses:` line pinned to the latest release tag from the squanchy repo.
 
 name: squanchy
 
@@ -37,7 +37,7 @@ jobs:
 
       - name: squanchy review
         # pin to the latest release tag (see the squanchy repo's Releases page)
-        uses: <squanchy-owner>/squanchy@v0.2.0
+        uses: DennaLabs/squanchy@v0.5.0
         with:
           comment: ${{ github.event.comment.body }}
           comment_id: ${{ github.event.comment.id }}

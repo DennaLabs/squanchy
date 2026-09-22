@@ -27,7 +27,7 @@ export async function postChatCompletion(apiKey: string, body: unknown, http: Ht
   const headers: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
     "Content-Type": "application/json",
-    "HTTP-Referer": "https://github.com/squanchy",
+    "HTTP-Referer": "https://github.com/DennaLabs/squanchy",
     "X-Title": "squanchy",
   };
   let lastError: Error | null = null;
