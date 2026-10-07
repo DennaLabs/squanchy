@@ -104,22 +104,38 @@ describe("chat", () => {
   });
 });
 
-describe("chatWithTools", () => {
-  test("returns content and parsed tool calls", async () => {
-    const body = {
-      choices: [
-        {
-          message: {
-            content: null,
-            tool_calls: [
-              { id: "c1", type: "function", function: { name: "get_file_diff", arguments: '{"path":"a.ts"}' } },
-            ],
-          },
-        },
-      ],
-    };
-    const http = makeHttp([() => jsonResponse(body)]);
-    const messages: ChatMessage[] = [{ role: "user", content: "review" }];
+describe("chatWithTools (streaming)", () => {
+  function sseResponse(chunks: string[]): Response {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enc = new TextEncoder();
+        for (const c of chunks) controller.enqueue(enc.encode(c));
+        controller.close();
+      },
+    });
+    return new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  }
+
+  const messages: ChatMessage[] = [{ role: "user", content: "review" }];
+
+  test("aggregates content deltas split across events and chunks", async () => {
+    const http = makeHttp([
+      () => sseResponse(['data: {"choices":[{"delta":{"content":"all "}}]}\n\ndata: {"choi', 'ces":[{"delta":{"content":"good"}}]}\n\ndata: [DONE]\n\n']),
+    ]);
+    const out = await chatWithTools({ apiKey: "k", model: "m", messages }, http);
+    expect(out.content).toBe("all good");
+    expect(out.toolCalls).toEqual([]);
+  });
+
+  test("aggregates tool call fragments across events", async () => {
+    const http = makeHttp([
+      () =>
+        sseResponse([
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"get_file_diff","arguments":"{\\"path\\":"}}]}}]}\n\n',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"a.ts\\"}"}}]}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+    ]);
     const out = await chatWithTools({ apiKey: "k", model: "m", messages }, http);
     expect(out.content).toBeNull();
     expect(out.toolCalls).toEqual([
@@ -127,20 +143,63 @@ describe("chatWithTools", () => {
     ]);
   });
 
-  test("no tool calls -> empty array, content preserved", async () => {
-    const http = makeHttp([() => jsonResponse({ choices: [{ message: { content: "all good" } }] })]);
-    const out = await chatWithTools(
-      { apiKey: "k", model: "m", messages: [{ role: "user", content: "x" }] },
-      http,
-    );
-    expect(out.toolCalls).toEqual([]);
-    expect(out.content).toBe("all good");
+  test("multiple tool calls keep index order", async () => {
+    const http = makeHttp([
+      () =>
+        sseResponse([
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","type":"function","function":{"name":"second","arguments":"{}"}}]}}]}\n\n',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","type":"function","function":{"name":"first","arguments":"{}"}}]}}]}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+    ]);
+    const out = await chatWithTools({ apiKey: "k", model: "m", messages }, http);
+    expect(out.toolCalls.map((c) => c.function.name)).toEqual(["first", "second"]);
   });
 
-  test("malformed response fails validation", async () => {
-    const http = makeHttp([() => jsonResponse({ nope: true })]);
-    await expect(
-      chatWithTools({ apiKey: "k", model: "m", messages: [{ role: "user", content: "x" }] }, http),
-    ).rejects.toThrow();
+  test("mid-stream error event rejects and retries once", async () => {
+    const http = makeHttp([
+      () => sseResponse(['data: {"error":{"message":"upstream overloaded"}}\n\n']),
+    ]);
+    await expect(chatWithTools({ apiKey: "k", model: "m", messages }, http)).rejects.toThrow(/stream error.*upstream overloaded/s);
+    expect(http.calls.length).toBe(2);
+  });
+
+  test("empty stream (no content, no tool calls) rejects", async () => {
+    const http = makeHttp([() => sseResponse(["data: [DONE]\n\n"])]);
+    await expect(chatWithTools({ apiKey: "k", model: "m", messages }, http)).rejects.toThrow(/without content or tool calls/);
+  });
+
+  test("429 before stream retries honoring Retry-After", async () => {
+    const http = makeHttp([
+      () => textResponse(429, "slow down", { "Retry-After": "1" }),
+      () => sseResponse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n']),
+    ]);
+    const out = await chatWithTools({ apiKey: "k", model: "m", messages }, http);
+    expect(out.content).toBe("ok");
+    expect(http.sleeps).toEqual([1000]);
+  });
+
+  test("idle stream aborts with idle-timeout message", async () => {
+    process.env.SQUANCHY_STREAM_IDLE_MS = "30";
+    try {
+      const calls: number[] = [];
+      // wire the abort signal to the stream, like a real fetch does
+      const fetchFn = (async (_url: unknown, init?: { signal?: AbortSignal }) => {
+        calls.push(1);
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            init?.signal?.addEventListener("abort", () => {
+              controller.error(new DOMException("The operation was aborted.", "AbortError"));
+            });
+          },
+        });
+        return new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+      }) as unknown as typeof fetch;
+      const http = { fetchFn, sleepFn: async () => {} };
+      await expect(chatWithTools({ apiKey: "k", model: "m", messages }, http)).rejects.toThrow(/went idle/);
+      expect(calls.length).toBe(2);
+    } finally {
+      delete process.env.SQUANCHY_STREAM_IDLE_MS;
+    }
   });
 });
