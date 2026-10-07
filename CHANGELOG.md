@@ -1,3 +1,10 @@
+## [0.5.1](https://github.com/DennaLabs/squanchy/compare/v0.5.0...v0.5.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* 🐛 stream OpenRouter chat completions with idle timeout ([0ae3134](https://github.com/DennaLabs/squanchy/commit/0ae3134f5836cd42ccd8ecc68370118aca464e52))
+
 # [0.5.0](https://github.com/crampeddamselfly/squanchy/compare/v0.4.0...v0.5.0) (2026-09-21)
 
 
