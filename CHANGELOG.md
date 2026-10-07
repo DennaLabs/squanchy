@@ -1,3 +1,10 @@
+# [0.6.0](https://github.com/DennaLabs/squanchy/compare/v0.5.2...v0.6.0) (2026-10-07)
+
+
+### Features
+
+* 🎸 session model banner + token/cost usage repor ([d9412fb](https://github.com/DennaLabs/squanchy/commit/d9412fb6547763001483213fd3929fe6224a477e))
+
 ## [0.5.2](https://github.com/DennaLabs/squanchy/compare/v0.5.1...v0.5.2) (2026-10-07)
 
 
