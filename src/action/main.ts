@@ -6,11 +6,14 @@ import { parsePrArg } from "../args";
 import { loadConfig } from "../config";
 import { postPrReview } from "../github/pr";
 import { chatWithTools as realChatWithTools } from "../openrouter/client";
+import { fetchModelInfo } from "../openrouter/models";
 import type { AssistantMessage, ChatWithToolsArgs } from "../openrouter/client";
+import type { ModelInfo } from "../openrouter/models";
 import { parseDepths } from "../review/depth";
 import { runReview } from "../review/run";
 import { FsSnapshot } from "../snapshot/fs";
 import { createReviewProgress } from "../ui/review-progress";
+import { formatUsage } from "../usage";
 import { parseBotCommand } from "./command";
 
 /** Only these comment authors may trigger reviews (stops drive-by credit burn). */
@@ -35,6 +38,8 @@ export interface ActionDeps {
   env: ActionEnv;
   octokitFactory: (token: string | undefined) => Octokit;
   chatWithTools: (args: ChatWithToolsArgs) => Promise<AssistantMessage>;
+  /** model metadata lookup for the session banner + cost estimate; defaults to the OpenRouter /models API */
+  getModelInfo?: (apiKey: string, model: string) => Promise<ModelInfo | null>;
   log: (msg: string) => void;
   /** cwd: the checked-out PR head (provides .squanchy/context.md and the fs snapshot) */
   repoDir: string;
@@ -138,16 +143,18 @@ export async function runAction(deps: ActionDeps): Promise<number> {
         createSnapshot: () => new FsSnapshot(deps.repoDir),
         postReview: (bundle, res) => postPrReview(octokit, bundle, res),
         maxSteps: env.SQUANCHY_MAX_STEPS ? Number(env.SQUANCHY_MAX_STEPS) : cfg.maxSteps,
+        ...(deps.getModelInfo ? { getModelInfo: (model: string) => deps.getModelInfo!(apiKey, model) } : {}),
         debug: env.SQUANCHY_DEBUG === "1" ? (line) => log(line) : undefined,
         onProgress: progress.onProgress,
       },
     );
     const url = result.overview?.match(/Posted: (\S+)/)?.[1];
+    const usageNote = result.usage ? ` \u00b7 ${formatUsage(result.usage)}` : "";
     await comment(
-      `squanchy reviewed${url ? `: ${url}` : ""} — ${result.findings.length} finding(s). ` +
+      `squanchy reviewed${url ? `: ${url}` : ""} \u2014 ${result.findings.length} finding(s)${usageNote}. ` +
         "<sub>AI-generated; you are always in control of approving this PR.</sub>",
     );
-    log(`review posted (${result.findings.length} findings)`);
+    log(`review posted (${result.findings.length} findings${result.usage ? `, ${formatUsage(result.usage)}` : ""})`);
     return 0;
   } catch (err) {
     const message = errMsg(err);
@@ -170,6 +177,7 @@ if (import.meta.main) {
     env: process.env as ActionEnv,
     octokitFactory: (token) => new Octokit(token ? { auth: token } : {}),
     chatWithTools: realChatWithTools,
+    getModelInfo: fetchModelInfo,
     log: (msg) => console.log(`[squanchy] ${msg}`),
     repoDir: process.env.GITHUB_WORKSPACE ?? process.cwd(),
     globalDir: join(homedir(), ".config", "squanchy"),

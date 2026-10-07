@@ -4,12 +4,15 @@ import type { ToolCtx } from "../agent/tools";
 import { DEFAULT_MAX_STEPS } from "../config";
 import { fetchPrBundle, type PrBundle } from "../github/pr";
 import type { AssistantMessage, ChatWithToolsArgs } from "../openrouter/client";
+import type { ModelInfo } from "../openrouter/models";
 import type { RepoSnapshot } from "../snapshot/snapshot";
 import type { ReviewOptions, ReviewResult } from "../types";
+import type { TokenUsage } from "../usage";
 import { filterFindingsToDiff } from "./parse";
 import { buildFirstUserMessage, buildSystemPrompt } from "./prompt";
 
 export type ReviewEvent =
+  | { type: "session"; model: string; info: ModelInfo | null }
   | { type: "pr-fetch"; repo: string; prNumber: number }
   | {
       type: "pr-fetched";
@@ -24,7 +27,7 @@ export type ReviewEvent =
   | { type: "snapshot"; kind: RepoSnapshot["kind"] }
   | { type: "agent"; event: AgentEvent }
   | { type: "posted"; url: string; findings: number }
-  | { type: "done"; findings: number; seconds: number };
+  | { type: "done"; findings: number; seconds: number; usage?: TokenUsage };
 
 export interface RunReviewDeps {
   octokit: Octokit;
@@ -37,11 +40,27 @@ export interface RunReviewDeps {
   maxSteps?: number;
   debug?: (line: string) => void;
   onProgress?: (event: ReviewEvent) => void;
+  /** Best-effort model metadata for the session banner + cost estimate; omit to skip the lookup. */
+  getModelInfo?: (model: string) => Promise<ModelInfo | null>;
+}
+
+/** When the provider didn't report a cost, estimate it from the model's per-1M pricing. */
+export function withCostEstimate(usage: TokenUsage, info: ModelInfo | null): TokenUsage {
+  if (usage.costUsd !== null || !info) return usage;
+  if (info.promptUsdPer1M === null || info.completionUsdPer1M === null) return usage;
+  const est =
+    (usage.inputTokens / 1_000_000) * info.promptUsdPer1M +
+    (usage.outputTokens / 1_000_000) * info.completionUsdPer1M;
+  return { ...usage, costUsd: est };
 }
 
 export async function runReview(options: ReviewOptions, deps: RunReviewDeps): Promise<ReviewResult> {
   const emit = deps.onProgress ?? (() => {});
   const startedAt = Date.now();
+  const modelInfo = deps.getModelInfo
+    ? await deps.getModelInfo(options.model).catch(() => null)
+    : null;
+  emit({ type: "session", model: options.model, info: modelInfo });
   emit({ type: "pr-fetch", repo: options.repo, prNumber: options.prNumber });
   const bundle = await fetchPrBundle(deps.octokit, options.repo, options.prNumber);
   emit({
@@ -83,15 +102,21 @@ export async function runReview(options: ReviewOptions, deps: RunReviewDeps): Pr
       await snapshot?.dispose().catch(() => {});
     }
   }
-  const result = filterFindingsToDiff({ overview: loop.overview, findings: loop.findings }, bundle);
+  const usage = withCostEstimate(loop.usage, modelInfo);
+  const result: ReviewResult = {
+    ...filterFindingsToDiff({ overview: loop.overview, findings: loop.findings }, bundle),
+    usage,
+    model: options.model,
+    stepsUsed: loop.stepsUsed,
+  };
   if (options.mode === "review") {
     const posted = await deps.postReview(bundle, result);
     emit({ type: "posted", url: posted.htmlUrl, findings: result.findings.length });
     const done = { ...result, overview: (result.overview ?? "") + `\n\nPosted: ${posted.htmlUrl}` };
-    emit({ type: "done", findings: result.findings.length, seconds: elapsedSeconds(startedAt) });
+    emit({ type: "done", findings: result.findings.length, seconds: elapsedSeconds(startedAt), usage });
     return done;
   }
-  emit({ type: "done", findings: result.findings.length, seconds: elapsedSeconds(startedAt) });
+  emit({ type: "done", findings: result.findings.length, seconds: elapsedSeconds(startedAt), usage });
   return result;
 }
 

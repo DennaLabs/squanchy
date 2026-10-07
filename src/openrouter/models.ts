@@ -108,3 +108,54 @@ export async function fetchModelOptions(apiKey: string, http: HttpDeps = {}): Pr
   for (const m of curatedPresent) push(m);
   return ranked.slice(0, MAX_OPTIONS).map(toOption);
 }
+
+export interface ModelInfo {
+  id: string;
+  name: string | null;
+  provider: string;
+  contextLength: number | null;
+  isFree: boolean | null;
+  /** USD per 1M tokens (OpenRouter reports per-token strings) */
+  promptUsdPer1M: number | null;
+  completionUsdPer1M: number | null;
+}
+
+function per1M(raw: string | undefined): number | null {
+  if (raw === undefined) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n * 1_000_000 : null;
+}
+
+/** Best-effort metadata for one model (session banner, cost estimate). Null when the lookup fails. */
+export async function fetchModelInfo(
+  apiKey: string,
+  modelId: string,
+  http: HttpDeps = {},
+): Promise<ModelInfo | null> {
+  try {
+    const fetchFn = http.fetchFn ?? fetch;
+    const res = await fetchFn(MODELS_URL, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": "https://github.com/DennaLabs/squanchy",
+        "X-Title": "squanchy",
+      },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const parsed = ModelsResponseSchema.parse(await res.json());
+    const m = parsed.data.find((x) => x.id === modelId);
+    if (!m) return null;
+    return {
+      id: m.id,
+      name: m.name ?? null,
+      provider: m.id.split("/")[0] || m.id,
+      contextLength: m.context_length ?? null,
+      isFree: isFreeModel(m),
+      promptUsdPer1M: per1M(m.pricing?.prompt),
+      completionUsdPer1M: per1M(m.pricing?.completion),
+    };
+  } catch {
+    return null;
+  }
+}

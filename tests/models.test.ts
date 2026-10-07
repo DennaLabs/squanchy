@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_MODEL } from "../src/config";
-import { fetchModelOptions, isFreeModel, isUsableForReview, type OpenRouterModel } from "../src/openrouter/models";
+import {
+  fetchModelInfo,
+  fetchModelOptions,
+  isFreeModel,
+  isUsableForReview,
+  type OpenRouterModel,
+} from "../src/openrouter/models";
 
 function model(partial: Partial<OpenRouterModel> & { id: string }): OpenRouterModel {
   return {
@@ -94,5 +100,47 @@ describe("fetchModelOptions", () => {
 
   test("malformed payload fails validation", async () => {
     await expect(fetchModelOptions("k", { fetchFn: fakeFetch({ nope: true }) })).rejects.toThrow();
+  });
+});
+
+describe("fetchModelInfo", () => {
+  test("maps pricing to USD per 1M tokens and derives the provider", async () => {
+    const data = {
+      data: [
+        model({
+          id: "qwen/qwen3.8-27b",
+          name: "Qwen: Qwen3.8 27B",
+          pricing: { prompt: "0.000000425", completion: "0.00000255" },
+          context_length: 1_000_000,
+        }),
+      ],
+    };
+    const info = await fetchModelInfo("k", "qwen/qwen3.8-27b", { fetchFn: fakeFetch(data) });
+    expect(info).toMatchObject({
+      id: "qwen/qwen3.8-27b",
+      name: "Qwen: Qwen3.8 27B",
+      provider: "qwen",
+      contextLength: 1_000_000,
+      isFree: false,
+    });
+    expect(info!.promptUsdPer1M!).toBeCloseTo(0.425, 9);
+    expect(info!.completionUsdPer1M!).toBeCloseTo(2.55, 9);
+  });
+
+  test("free model flagged", async () => {
+    const data = { data: [model({ id: "a/b:free", pricing: { prompt: "0", completion: "0" } })] };
+    const info = await fetchModelInfo("k", "a/b:free", { fetchFn: fakeFetch(data) });
+    expect(info?.isFree).toBe(true);
+    expect(info?.promptUsdPer1M).toBe(0);
+  });
+
+  test("unknown model -> null", async () => {
+    const info = await fetchModelInfo("k", "no/such", { fetchFn: fakeFetch({ data: [] }) });
+    expect(info).toBeNull();
+  });
+
+  test("http failure -> null (best effort)", async () => {
+    const info = await fetchModelInfo("k", "a/b", { fetchFn: fakeFetch({ message: "nope" }, 401) });
+    expect(info).toBeNull();
   });
 });

@@ -152,3 +152,36 @@ describe("wrapText", () => {
     expect(wrapText("a\n\nb", 10)).toEqual(["a", "", "b"]);
   });
 });
+
+describe("usage footer", () => {
+  test("meta.usage and stepsUsed render in the header details", () => {
+    const out = renderReport(
+      { overview: null, findings: [] },
+      {
+        color: false,
+        width: 100,
+        meta: {
+          model: "qwen/qwen3.8-27b",
+          seconds: 42,
+          stepsUsed: 7,
+          usage: { inputTokens: 123456, outputTokens: 2345, costUsd: 0.0432 },
+        },
+      },
+    );
+    expect(out).toContain("7 steps");
+    expect(out).toContain("123,456 tok in · 2,345 tok out · cost $0.0432");
+  });
+
+  test("free run shows $0 (free)", () => {
+    const out = renderReport(
+      { overview: null, findings: [] },
+      { color: false, width: 100, meta: { usage: { inputTokens: 10, outputTokens: 2, costUsd: 0 } } },
+    );
+    expect(out).toContain("cost $0 (free)");
+  });
+
+  test("no usage -> no token line", () => {
+    const out = renderReport({ overview: null, findings: [] }, { color: false, width: 100 });
+    expect(out).not.toContain("tok in");
+  });
+});

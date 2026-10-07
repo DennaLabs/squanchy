@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts";
 import type { ReviewEvent } from "../review/run";
+import { formatUsage, type TokenUsage } from "../usage";
 import type { Reporter } from "./reporter";
 
 export const CAT_BANNER = [" /\\_/\\   squanchy", "( o.o )  is on it", "  > ^ <"].join("\n");
@@ -10,6 +11,13 @@ export function printReviewIntro(): void {
 }
 
 export interface ReviewProgressMeta {
+  model?: string;
+  modelName?: string | null;
+  provider?: string | null;
+  isFree?: boolean | null;
+  promptUsdPer1M?: number | null;
+  completionUsdPer1M?: number | null;
+  usage?: TokenUsage;
   repo?: string;
   prNumber?: number;
   title?: string;
@@ -26,6 +34,19 @@ export interface ReviewProgress {
   onProgress(event: ReviewEvent): void;
   /** metadata collected from events, for the final report header */
   meta: ReviewProgressMeta;
+}
+
+/** "model qwen/qwen3.8-27b (Qwen: Qwen3.8 27B) · provider qwen · $0.43/1M in · $2.55/1M out" */
+export function formatSessionLine(model: string, info: ReviewProgressMeta): string {
+  const bits = [`model ${model}`];
+  if (info.modelName && info.modelName !== model) bits.push(info.modelName);
+  if (info.provider) bits.push(`provider ${info.provider}`);
+  if (info.isFree) {
+    bits.push("free");
+  } else if (info.promptUsdPer1M != null && info.completionUsdPer1M != null) {
+    bits.push(`$${info.promptUsdPer1M.toFixed(2)}/1M in · $${info.completionUsdPer1M.toFixed(2)}/1M out`);
+  }
+  return bits.join(" · ");
 }
 
 const SNAPSHOT_MSG: Record<string, string> = {
@@ -77,6 +98,19 @@ export function createReviewProgress(reporter: Reporter, opts: { emoji?: boolean
     meta,
     onProgress(event: ReviewEvent): void {
       switch (event.type) {
+        case "session": {
+          const i = event.info;
+          Object.assign(meta, {
+            model: event.model,
+            modelName: i?.name ?? null,
+            provider: i?.provider ?? null,
+            isFree: i?.isFree ?? null,
+            promptUsdPer1M: i?.promptUsdPer1M ?? null,
+            completionUsdPer1M: i?.completionUsdPer1M ?? null,
+          });
+          reporter.info(formatSessionLine(event.model, meta));
+          break;
+        }
         case "pr-fetch":
           meta.repo = event.repo;
           meta.prNumber = event.prNumber;
@@ -125,8 +159,12 @@ export function createReviewProgress(reporter: Reporter, opts: { emoji?: boolean
         case "done":
           meta.findings = event.findings;
           meta.seconds = event.seconds;
+          if (event.usage) meta.usage = event.usage;
           reporter.stop(
-            `review complete — ${event.findings} finding${event.findings === 1 ? "" : "s"} in ${event.seconds}s`,
+            `review complete — ${event.findings} finding${event.findings === 1 ? "" : "s"} in ${event.seconds}s` +
+              (event.usage && (event.usage.inputTokens > 0 || event.usage.outputTokens > 0)
+                ? ` · ${formatUsage(event.usage)}`
+                : ""),
           );
           break;
       }

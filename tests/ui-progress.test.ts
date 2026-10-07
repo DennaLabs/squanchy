@@ -122,3 +122,61 @@ describe("createReviewProgress", () => {
     expect(CAT_BANNER).toContain("squanchy");
   });
 });
+
+describe("session + usage display", () => {
+  const paidInfo = {
+    id: "test/model",
+    name: "Test Model",
+    provider: "test",
+    contextLength: 128_000,
+    isFree: false,
+    promptUsdPer1M: 3,
+    completionUsdPer1M: 15,
+  };
+
+  test("session event prints model, provider and pricing", () => {
+    const r = fakeReporter();
+    const progress = createReviewProgress(r, { emoji: false });
+    progress.onProgress({ type: "session", model: "test/model", info: paidInfo });
+    expect(r.calls[0]).toEqual(["info", "model test/model · Test Model · provider test · $3.00/1M in · $15.00/1M out"]);
+    expect(progress.meta).toMatchObject({ model: "test/model", provider: "test", isFree: false });
+  });
+
+  test("free model session line says free", () => {
+    const r = fakeReporter();
+    const progress = createReviewProgress(r, { emoji: false });
+    progress.onProgress({ type: "session", model: "a/b:free", info: { ...paidInfo, id: "a/b:free", isFree: true } });
+    expect(r.calls[0][1]).toContain("free");
+    expect(r.calls[0][1]).not.toContain("/1M");
+  });
+
+  test("session without info still names the model", () => {
+    const r = fakeReporter();
+    const progress = createReviewProgress(r, { emoji: false });
+    progress.onProgress({ type: "session", model: "test/model", info: null });
+    expect(r.calls[0]).toEqual(["info", "model test/model"]);
+  });
+
+  test("done message includes token + cost report", () => {
+    const r = fakeReporter();
+    const progress = createReviewProgress(r, { emoji: false });
+    progress.onProgress({
+      type: "done",
+      findings: 1,
+      seconds: 12,
+      usage: { inputTokens: 12345, outputTokens: 678, costUsd: 0.0042 },
+    });
+    const stop = r.calls.at(-1)!;
+    expect(stop[0]).toBe("stop");
+    expect(stop[1]).toContain("1 finding in 12s");
+    expect(stop[1]).toContain("12,345 tok in · 678 tok out · cost $0.0042");
+    expect(progress.meta.usage).toEqual({ inputTokens: 12345, outputTokens: 678, costUsd: 0.0042 });
+  });
+
+  test("done without usage keeps the old message", () => {
+    const r = fakeReporter();
+    const progress = createReviewProgress(r, { emoji: false });
+    progress.onProgress({ type: "done", findings: 2, seconds: 5 });
+    expect(r.calls.at(-1)).toEqual(["stop", "review complete — 2 findings in 5s"]);
+  });
+});

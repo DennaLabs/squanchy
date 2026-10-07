@@ -179,6 +179,44 @@ describe("chatWithTools (streaming)", () => {
     expect(http.sleeps).toEqual([1000]);
   });
 
+  test("final usage chunk is captured with tokens and cost", async () => {
+    const http = makeHttp([
+      () =>
+        sseResponse([
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n',
+          'data: {"choices":[{"delta":{"content":"","role":"assistant"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1234,"completion_tokens":56,"total_tokens":1290,"cost":0.0042}}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+    ]);
+    const out = await chatWithTools({ apiKey: "k", model: "m", messages }, http);
+    expect(out.content).toBe("hi");
+    expect(out.usage).toEqual({ inputTokens: 1234, outputTokens: 56, costUsd: 0.0042 });
+  });
+
+  test("usage without cost reports null cost", async () => {
+    const http = makeHttp([
+      () =>
+        sseResponse([
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n',
+          'data: {"choices":[{"delta":{"content":""}}],"usage":{"prompt_tokens":10,"completion_tokens":2}}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+    ]);
+    const out = await chatWithTools({ apiKey: "k", model: "m", messages }, http);
+    expect(out.usage).toEqual({ inputTokens: 10, outputTokens: 2, costUsd: null });
+  });
+
+  test("request body enables streaming and usage reporting", async () => {
+    const sent: { body: Record<string, unknown> | null } = { body: null };
+    const fetchFn = (async (_url: unknown, init: { body?: string }) => {
+      sent.body = JSON.parse(init.body ?? "{}") as Record<string, unknown>;
+      return sseResponse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', "data: [DONE]\n\n"]);
+    }) as unknown as typeof fetch;
+    await chatWithTools({ apiKey: "k", model: "m", messages }, { fetchFn, sleepFn: async () => {} });
+    expect(sent.body?.stream).toBe(true);
+    expect(sent.body?.usage).toEqual({ include: true });
+  });
+
   test("idle stream aborts with idle-timeout message", async () => {
     process.env.SQUANCHY_STREAM_IDLE_MS = "30";
     try {

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Octokit } from "@octokit/rest";
 import { runReview, type ReviewEvent, type RunReviewDeps } from "../src/review/run";
 import type { AssistantMessage, ChatWithToolsArgs, ToolCall } from "../src/openrouter/client";
+import type { ModelInfo } from "../src/openrouter/models";
 import type { GrepMatch, RepoSnapshot } from "../src/snapshot/snapshot";
 import { fixtureBundle } from "./fixtures/pr-bundle";
 import type { ReviewOptions } from "../src/types";
@@ -51,6 +52,23 @@ function toolCall(id: string, name: string, args: unknown): ToolCall {
 function asst(content: string | null, ...toolCalls: ToolCall[]): AssistantMessage {
   return { content, toolCalls };
 }
+
+function asstWithUsage(
+  usage: { inputTokens: number; outputTokens: number; costUsd: number | null },
+  ...toolCalls: ToolCall[]
+): AssistantMessage {
+  return { content: null, toolCalls, usage };
+}
+
+const paidModelInfo: ModelInfo = {
+  id: "test-model",
+  name: "Test Model",
+  provider: "test",
+  contextLength: 128_000,
+  isFree: false,
+  promptUsdPer1M: 3,
+  completionUsdPer1M: 15,
+};
 
 function fakeSnapshot(onDispose: () => void): RepoSnapshot {
   return {
@@ -222,12 +240,13 @@ describe("onProgress lifecycle events", () => {
     const h = makeDeps([asst(null, sqliFinding), asst(null, finish)]);
     await runReview(options, h.deps);
     const types = h.events.map((e) => e.type);
-    expect(types[0]).toBe("pr-fetch");
-    expect(types[1]).toBe("pr-fetched");
+    expect(types[0]).toBe("session");
+    expect(types[1]).toBe("pr-fetch");
+    expect(types[2]).toBe("pr-fetched");
     expect(types.at(-1)).toBe("done");
     expect(types).not.toContain("snapshot");
     expect(types).not.toContain("posted");
-    const fetched = h.events[1] as Extract<ReviewEvent, { type: "pr-fetched" }>;
+    const fetched = h.events[2] as Extract<ReviewEvent, { type: "pr-fetched" }>;
     expect(fetched).toMatchObject({
       repo: "acme/widgets",
       prNumber: 42,
@@ -260,5 +279,59 @@ describe("onProgress lifecycle events", () => {
     expect(posted.url).toBe("https://github.com/acme/widgets/pull/42#pullrequestreview-1");
     expect(posted.findings).toBe(1);
     expect(h.events.indexOf(posted)).toBeLessThan(h.events.findIndex((e) => e.type === "done"));
+  });
+});
+
+describe("session + usage reporting", () => {
+  test("session event carries model id and info when getModelInfo is wired", async () => {
+    const h = makeDeps([asst(null, finish)]);
+    h.deps.getModelInfo = async () => paidModelInfo;
+    await runReview(options, h.deps);
+    const session = h.events[0] as Extract<ReviewEvent, { type: "session" }>;
+    expect(session.type).toBe("session");
+    expect(session.model).toBe("test-model");
+    expect(session.info).toEqual(paidModelInfo);
+  });
+
+  test("session info is null without getModelInfo, and a throwing lookup is caught", async () => {
+    const h = makeDeps([asst(null, finish)]);
+    await runReview(options, h.deps);
+    expect((h.events[0] as Extract<ReviewEvent, { type: "session" }>).info).toBeNull();
+
+    const h2 = makeDeps([asst(null, finish)]);
+    h2.deps.getModelInfo = async () => {
+      throw new Error("boom");
+    };
+    await runReview(options, h2.deps);
+    expect((h2.events[0] as Extract<ReviewEvent, { type: "session" }>).info).toBeNull();
+  });
+
+  test("usage sums across steps and lands on result + done event", async () => {
+    const h = makeDeps([
+      asstWithUsage({ inputTokens: 100, outputTokens: 10, costUsd: 0.001 }, sqliFinding),
+      asstWithUsage({ inputTokens: 200, outputTokens: 20, costUsd: 0.002 }, finish),
+    ]);
+    const result = await runReview(options, h.deps);
+    expect(result.usage).toEqual({ inputTokens: 300, outputTokens: 30, costUsd: 0.003 });
+    expect(result.model).toBe("test-model");
+    expect(result.stepsUsed).toBe(2);
+    const done = h.events.at(-1) as Extract<ReviewEvent, { type: "done" }>;
+    expect(done.usage).toEqual({ inputTokens: 300, outputTokens: 30, costUsd: 0.003 });
+  });
+
+  test("missing provider cost is estimated from model pricing", async () => {
+    const h = makeDeps([
+      asstWithUsage({ inputTokens: 1_000_000, outputTokens: 100_000, costUsd: null }, finish),
+    ]);
+    h.deps.getModelInfo = async () => paidModelInfo;
+    const result = await runReview(options, h.deps);
+    // 1M in * $3/1M + 0.1M out * $15/1M = $4.50
+    expect(result.usage?.costUsd).toBeCloseTo(4.5, 6);
+  });
+
+  test("no usage reported anywhere -> zeroed usage, null cost", async () => {
+    const h = makeDeps([asst(null, finish)]);
+    const result = await runReview(options, h.deps);
+    expect(result.usage).toEqual({ inputTokens: 0, outputTokens: 0, costUsd: null });
   });
 });

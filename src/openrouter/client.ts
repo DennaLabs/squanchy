@@ -1,3 +1,5 @@
+import type { TokenUsage } from "../usage";
+
 const CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_TIMEOUT_MS = 300_000;
 const DEFAULT_STREAM_IDLE_MS = 120_000;
@@ -175,6 +177,8 @@ export interface ChatWithToolsArgs {
 export interface AssistantMessage {
   content: string | null;
   toolCalls: ToolCall[];
+  /** present when the stream's final usage chunk reported token counts */
+  usage?: TokenUsage;
 }
 
 interface StreamDelta {
@@ -190,6 +194,7 @@ interface StreamDelta {
 interface StreamEvent {
   choices?: { delta?: StreamDelta; finish_reason?: string | null }[];
   error?: { message?: string; code?: number } | null;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number | null } | null;
 }
 
 interface ToolCallAcc {
@@ -223,6 +228,7 @@ async function readSseAssistantMessage(
   const decoder = new TextDecoder();
   let buf = "";
   let content = "";
+  let usage: TokenUsage | undefined;
   const toolCalls = new Map<number, ToolCallAcc>();
   const handleLine = (line: string): boolean => {
     const trimmed = line.replace(/\r$/, "");
@@ -237,6 +243,14 @@ async function readSseAssistantMessage(
     }
     if (event.error) {
       throw new Error(`OpenRouter stream error: ${event.error.message ?? JSON.stringify(event.error)}`);
+    }
+    if (event.usage) {
+      const u = event.usage;
+      usage = {
+        inputTokens: u.prompt_tokens ?? 0,
+        outputTokens: u.completion_tokens ?? 0,
+        costUsd: typeof u.cost === "number" ? u.cost : null,
+      };
     }
     const delta = event.choices?.[0]?.delta;
     if (!delta) return false; // usage/heartbeat events
@@ -294,7 +308,7 @@ async function readSseAssistantMessage(
   if (content === "" && calls.length === 0) {
     throw new Error("OpenRouter stream ended without content or tool calls");
   }
-  return { content: content === "" ? null : content, toolCalls: calls };
+  return { content: content === "" ? null : content, toolCalls: calls, ...(usage ? { usage } : {}) };
 }
 
 /**
@@ -308,6 +322,7 @@ export async function chatWithTools(args: ChatWithToolsArgs, http: HttpDeps = {}
     temperature: args.temperature ?? 0.2,
     messages: args.messages,
     stream: true,
+    usage: { include: true },
   };
   if (args.tools && args.tools.length > 0) body.tools = args.tools;
   const idleMs = streamIdleMs();

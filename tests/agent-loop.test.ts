@@ -178,3 +178,20 @@ describe("runAgentLoop", () => {
     expect(textOnly.at(-1)).toMatchObject({ type: "finished", reason: "text-only", findings: 0 });
   });
 });
+
+describe("usage accounting", () => {
+  test("usage sums across steps, including steps without usage", async () => {
+    const { deps } = makeDeps([
+      { content: null, toolCalls: [toolCall("a", "read_file", { path: "x" })], usage: { inputTokens: 100, outputTokens: 5, costUsd: 0.001 } },
+      { content: null, toolCalls: [toolCall("b", "finish_review", {})], usage: { inputTokens: 50, outputTokens: 2, costUsd: null } },
+    ]);
+    const out = await runAgentLoop(deps);
+    expect(out.usage).toEqual({ inputTokens: 150, outputTokens: 7, costUsd: 0.001 });
+  });
+
+  test("no usage anywhere -> zeroed totals, null cost", async () => {
+    const { deps } = makeDeps([asst(null, toolCall("a", "finish_review", {}))]);
+    const out = await runAgentLoop(deps);
+    expect(out.usage).toEqual({ inputTokens: 0, outputTokens: 0, costUsd: null });
+  });
+});

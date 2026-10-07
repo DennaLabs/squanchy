@@ -9,6 +9,7 @@ import { postPrReview } from "./github/pr";
 import { runInit, type InitFlags } from "./init/profile";
 import { askInitClack } from "./init/prompts-clack";
 import { chatWithTools } from "./openrouter/client";
+import { fetchModelInfo } from "./openrouter/models";
 import { renderReport } from "./report/render";
 import { DEFAULT_DEPTHS, parseDepths } from "./review/depth";
 import { runReview, type RunReviewDeps } from "./review/run";
@@ -102,6 +103,7 @@ export async function run(argv: string[]): Promise<void> {
         createSnapshot: createCliSnapshot(tryDetectRepoFromGitRemote(process.cwd()), githubToken),
         postReview: (bundle, res) => postPrReview(octokit, bundle, res),
         maxSteps: cfg.maxSteps,
+        getModelInfo: (model) => fetchModelInfo(apiKey, model),
         debug: process.env.SQUANCHY_DEBUG === "1" ? (line) => console.error(line) : undefined,
         onProgress: progress.onProgress,
       };
@@ -125,6 +127,8 @@ export async function run(argv: string[]): Promise<void> {
             seconds: m.seconds,
             headSha: m.headSha,
             postedUrl: m.postedUrl,
+            usage: result.usage,
+            stepsUsed: result.stepsUsed,
           },
         }),
       );

@@ -1,5 +1,6 @@
 import pc from "picocolors";
 import type { Depth, Finding, Mode, ReviewResult } from "../types";
+import { formatUsage, type TokenUsage } from "../usage";
 
 export interface ReportMeta {
   repo?: string;
@@ -11,6 +12,8 @@ export interface ReportMeta {
   seconds?: number;
   headSha?: string;
   postedUrl?: string;
+  usage?: TokenUsage;
+  stepsUsed?: number;
 }
 
 export interface RenderOptions {
@@ -113,6 +116,8 @@ function headerLines(meta: ReportMeta | undefined, pal: Palette, color: boolean)
     meta?.model ?? null,
     meta?.depths?.length ? `depths: ${meta.depths.join(",")}` : null,
     meta?.seconds !== undefined ? `${meta.seconds}s` : null,
+    meta?.stepsUsed !== undefined ? `${meta.stepsUsed} steps` : null,
+    meta?.usage ? formatUsage(meta.usage) : null,
   ].filter(Boolean);
   if (details.length > 0) lines.push(`│ ${pal.dim(details.join(" · "))}`);
   if (meta?.postedUrl) lines.push(`│ ${pal.dim(`posted: ${meta.postedUrl}`)}`);

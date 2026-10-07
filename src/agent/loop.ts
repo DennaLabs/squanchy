@@ -1,5 +1,6 @@
 import type { AssistantMessage, ChatMessage, ChatWithToolsArgs } from "../openrouter/client";
 import type { Finding } from "../types";
+import { addUsage, EMPTY_USAGE, type TokenUsage } from "../usage";
 import { TOOL_DEFS, executeTool, type ToolCtx } from "./tools";
 
 export interface AgentLoopDeps {
@@ -20,6 +21,8 @@ export interface AgentLoopResult {
   overview: string | null;
   stepsUsed: number;
   finishReason: "finished" | "max-steps" | "text-only";
+  /** tokens + cost summed across every model step (cost null when the provider didn't report one) */
+  usage: TokenUsage;
 }
 
 export type AgentEvent =
@@ -55,6 +58,7 @@ export async function runAgentLoop(deps: AgentLoopDeps): Promise<AgentLoopResult
   const findings: Finding[] = [];
   let overview: string | null = null;
   let textStreak = 0;
+  let usage: TokenUsage = { ...EMPTY_USAGE };
 
   for (let step = 1; step <= deps.maxSteps; step++) {
     emit({ type: "step", n: step, maxSteps: deps.maxSteps });
@@ -65,6 +69,7 @@ export async function runAgentLoop(deps: AgentLoopDeps): Promise<AgentLoopResult
       tools: TOOL_DEFS,
       temperature: deps.temperature ?? 0.2,
     });
+    usage = addUsage(usage, asst.usage);
     messages.push({
       role: "assistant",
       content: asst.content,
@@ -83,7 +88,7 @@ export async function runAgentLoop(deps: AgentLoopDeps): Promise<AgentLoopResult
       if (textStreak >= 2) {
         log(`[loop] plain text twice in a row; finishing with ${findings.length} finding(s)`);
         emit({ type: "finished", reason: "text-only", findings: findings.length, stepsUsed: step });
-        return { findings, overview, stepsUsed: step, finishReason: "text-only" };
+        return { findings, overview, stepsUsed: step, finishReason: "text-only", usage };
       }
       messages.push({ role: "user", content: NUDGE });
       continue;
@@ -111,7 +116,7 @@ export async function runAgentLoop(deps: AgentLoopDeps): Promise<AgentLoopResult
       if (outcome.kind === "finish") {
         if (outcome.overview) overview = outcome.overview;
         emit({ type: "finished", reason: "finished", findings: findings.length, stepsUsed: step });
-        return { findings, overview, stepsUsed: step, finishReason: "finished" };
+        return { findings, overview, stepsUsed: step, finishReason: "finished", usage };
       }
       messages.push({ role: "tool", tool_call_id: call.id, content: outcome.text });
     }
@@ -119,5 +124,5 @@ export async function runAgentLoop(deps: AgentLoopDeps): Promise<AgentLoopResult
 
   log(`[loop] max steps (${deps.maxSteps}) reached; finishing with ${findings.length} finding(s)`);
   emit({ type: "finished", reason: "max-steps", findings: findings.length, stepsUsed: deps.maxSteps });
-  return { findings, overview, stepsUsed: deps.maxSteps, finishReason: "max-steps" };
+  return { findings, overview, stepsUsed: deps.maxSteps, finishReason: "max-steps", usage };
 }
