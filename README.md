@@ -106,7 +106,7 @@ Default when unspecified: `vulnerabilities,major`. Depths combine: `-d vulnerabi
 
 ### How a review runs
 
-squanchy is an agent, not a one-shot prompt. Each review is a loop of model steps (default cap: `maxSteps` = 25, configurable). The model gets the PR metadata and diffs (inlined up to 60k chars) plus these tools:
+squanchy is an agent, not a one-shot prompt. Each review is a loop of model steps (default cap: `maxSteps` = 25, configurable). The model gets the PR metadata and the changed-files list; diffs are inlined only for small PRs (total patch text ≤ 12k chars), larger ones are fetched on demand per file (this keeps big diffs out of every step's context). Plus these tools:
 
 | tool              | what it does                                                          |
 | ----------------- | --------------------------------------------------------------------- |
@@ -164,7 +164,7 @@ What happens on a trigger: 👀 reaction on your comment → agent review → on
 ## Notes and limits
 
 - The default model is the largest free OpenRouter model as of 2026-09. Free models are rate limited (roughly 20 requests/min, 50/day on low-credit accounts) and can be rotated by OpenRouter at any time. Agent reviews use one request per step (up to `maxSteps`), so free-tier budgets deplete faster; override with `-m` or `defaultModel` in config, and lower `maxSteps` to cap cost.
-- The fetched diff is capped at 150k characters of patch text and the first prompt inlines up to 60k; the agent can still fetch remaining patches per file, and full file contents are always available via `read_file`.
+- The fetched diff is capped at 500k characters of patch text. Small PRs inline every diff in the first prompt; larger PRs list only file stats, and the agent fetches patches per file with `get_file_diff` (generated files like lockfiles are marked so they can be skipped). Full file contents are always available via `read_file`.
 - Inline comments are only posted on lines present in the diff (GitHub rejects the rest); other findings appear in the review summary body.
 - Secrets live only in `~/.config/squanchy/config.json` (mode 600) or env vars. Never commit keys; `.squanchy/config.json` in the repo ignores secret fields by design.
 

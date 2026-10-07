@@ -1,7 +1,8 @@
 import type { Octokit } from "@octokit/rest";
 import type { ReviewResult } from "../types";
 
-export const MAX_DIFF_CHARS = 150_000;
+/** Caps total patch chars kept on the bundle. Diffs are fetched on demand (get_file_diff), so this no longer bounds the prompt — only tool availability and finding line-validation. */
+export const MAX_DIFF_CHARS = 500_000;
 const TRUNCATION_MARKER = "\n... [squanchy: patch truncated]";
 
 export interface PrFile {
