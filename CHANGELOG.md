@@ -1,3 +1,10 @@
+## [0.5.2](https://github.com/DennaLabs/squanchy/compare/v0.5.1...v0.5.2) (2026-10-07)
+
+
+### Performance Improvements
+
+* ⚡️ on-demand diff fetching ([a1eb25c](https://github.com/DennaLabs/squanchy/commit/a1eb25c8a96517087fc571426ca5f17bd7f9928c))
+
 ## [0.5.1](https://github.com/DennaLabs/squanchy/compare/v0.5.0...v0.5.1) (2026-10-07)
 
 
