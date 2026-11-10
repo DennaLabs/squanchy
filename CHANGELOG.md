@@ -1,3 +1,10 @@
+## [0.6.1](https://github.com/DennaLabs/squanchy/compare/v0.6.0...v0.6.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **deps:** bump @clack/prompts from 1.8.0 to 1.8.1 in the runtime group ([0895391](https://github.com/DennaLabs/squanchy/commit/0895391f0dd0659fa62788cd59aaf2680e666bbe))
+
 # [0.6.0](https://github.com/DennaLabs/squanchy/compare/v0.5.2...v0.6.0) (2026-10-07)
 
 
