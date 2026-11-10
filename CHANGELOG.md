@@ -1,3 +1,10 @@
+## [0.6.2](https://github.com/DennaLabs/squanchy/compare/v0.6.1...v0.6.2) (2026-11-10)
+
+
+### Bug Fixes
+
+* **deps:** bump commander from 12.1.0 to 15.0.0 ([b588883](https://github.com/DennaLabs/squanchy/commit/b588883b25b827fd5bf7cde51ec32b2221a39521))
+
 ## [0.6.1](https://github.com/DennaLabs/squanchy/compare/v0.6.0...v0.6.1) (2026-11-10)
 
 
